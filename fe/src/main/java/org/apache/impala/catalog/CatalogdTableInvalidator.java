@@ -25,8 +25,14 @@ import com.sun.management.GarbageCollectorMXBean;
 import com.sun.management.GcInfo;
 import org.apache.impala.common.Reference;
 import org.apache.impala.service.BackendConfig;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.thrift.TTableName;
 import org.apache.log4j.Logger;
+import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
+import org.apache.hadoop.hive.metastore.api.NotificationEventRequest;
+import org.apache.hadoop.hive.metastore.api.NotificationEventResponse;
+import org.apache.hadoop.hive.metastore.api.NotificationEvent;
+import org.apache.thrift.TException;
 
 import javax.management.Notification;
 import javax.management.NotificationEmitter;
@@ -60,6 +66,8 @@ public class CatalogdTableInvalidator {
   final private long unusedTableTtlNano_;
   final private boolean invalidateTableOnMemoryPressure_;
   final private CatalogServiceCatalog catalog_;
+  private MetaStoreClient mclient_;
+
   /**
    * A thread waking up periodically to check if eviction is needed.
    */
@@ -93,6 +101,12 @@ public class CatalogdTableInvalidator {
    * Last time an time-based invalidation is executed in nanoseconds.
    */
   private long lastInvalidationTime_;
+
+  /*
+   * Last Event id seen. 
+   * TODO: Perhaps we need to take care of rollover/restart conditions.
+   */
+  private long lastMSEventId = -1;
 
   CatalogdTableInvalidator(CatalogServiceCatalog catalog, final long unusedTableTtlSec,
       boolean invalidateTableOnMemoryPressure, double oldGenFullThreshold,
@@ -239,6 +253,81 @@ public class CatalogdTableInvalidator {
     }
   }
 
+  /*https://github.com/akolb1/metastore-python.git
+   *
+   * import org.apache.hadoop.hive.metastore.api.
+   */
+  private void checkAndInvalidateOlderThan(long retireAgeNano) {
+    try {
+      long now = TIME_SOURCE.read();
+      if (mclient_ == null) {
+          mclient_ = catalog_.getMetaStoreClient();
+      }
+
+      if (lastMSEventId == -1) {
+         CurrentNotificationEventId evId = mclient_.getHiveClient().getCurrentNotificationEventId();
+         lastMSEventId = evId.getEventId();
+         LOG.info("Got new EventID "+ lastMSEventId);
+         return;
+      }
+
+      NotificationEventResponse evNotifs = 
+         mclient_.getHiveClient().getNextNotification(lastMSEventId,0,null);
+      //LOG.info("Got Notifications: " + evNotifs.getEventsSize());
+      //for (Iterator i = evNotifs.getEventsIterator(); i.hasNext(); ) {
+          
+      //    NotificationEvent event = (NotificationEvent)i.next();
+      for (NotificationEvent event: evNotifs.getEvents()) {
+          String dbName = event.getDbName();
+          String tableName = event.getTableName(); 
+          Long eventId = event.getEventId();
+
+          LOG.info("Got Event Type: "+event.getEventType());
+          if (eventId > lastMSEventId) {
+            lastMSEventId = eventId;
+          }
+
+          /*
+           * Following conditions can happen if the DB or table was added after we had got
+           * our first set of tables or after last invalidation.
+           * TODO: The newely discovered DBs and tables should perhaps be added to the catalog
+           *       In an incomplete state.
+           */
+          Db db = catalog_.getDb(dbName);
+          if (db == null) continue;
+
+          Table table = db.getTable(tableName);
+          if (table == null) {
+              if (event.getEventType().equals("CREATE_TABLE")) {
+                Table incompleteTbl = IncompleteTable.createUninitializedTable(db, tableName);
+                incompleteTbl.setCatalogVersion(catalog_.incrementAndGetCatalogVersion());
+                db.addTable(incompleteTbl);
+                LOG.info("Added Table " + incompleteTbl.getFullName());
+              }
+              //Else this is some error condition? (TODO)
+              continue;
+          }
+
+          if (event.getEventType().equals("DROP_TABLE")) {
+              catalog_.removeTable(dbName, tableName);
+              LOG.info("Dropping Table " + dbName + "." + tableName);
+              continue;
+          }
+
+          if (table instanceof IncompleteTable) continue;
+
+          Reference<Boolean> tblWasRemoved = new Reference<>();
+          Reference<Boolean> dbWasAdded = new Reference<>();
+          TTableName tTableName = table.getTableName().toThrift();
+          catalog_.invalidateTable(tTableName, tblWasRemoved, dbWasAdded);
+          LOG.info("Invalidated " + table.getFullName() + " due to Change in Schema ");
+
+      }
+    } catch (TException e) {
+      LOG.info(e);
+    }
+  }
+
   void stop() {
     synchronized (this) {
       stopped_ = true;
@@ -272,7 +361,7 @@ public class CatalogdTableInvalidator {
             // Wait for a fraction of unusedTableTtlNano_ if time-based invalidation is
             // enabled
             if (unusedTableTtlNano_ > 0 && now >= lastInvalidationTime_ + sleepTimeNano) {
-              invalidateOlderThan(unusedTableTtlNano_);
+              checkAndInvalidateOlderThan(unusedTableTtlNano_);
               lastInvalidationTime_ = now;
               scanCount_.incrementAndGet();
             }
