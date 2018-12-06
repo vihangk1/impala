@@ -225,6 +225,7 @@ public class CatalogServiceCatalog extends Catalog {
   private final String localLibraryPath_;
 
   private CatalogdTableInvalidator catalogdTableInvalidator_;
+  private final MetastoreEventsProcessor metastoreEventProcessor;
 
   /**
    * See the gflag definition in be/.../catalog-server.cc for details on these modes.
@@ -282,6 +283,7 @@ public class CatalogServiceCatalog extends Catalog {
         BackendConfig.INSTANCE.getBackendCfg().catalog_topic_mode.toUpperCase());
     catalogdTableInvalidator_ = CatalogdTableInvalidator.create(this,
         BackendConfig.INSTANCE);
+    metastoreEventProcessor = MetastoreEventsProcessor.get(this, BackendConfig.INSTANCE);
     Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
   }
 

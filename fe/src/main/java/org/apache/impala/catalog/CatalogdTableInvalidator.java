@@ -101,8 +101,6 @@ public class CatalogdTableInvalidator {
    */
   private long lastInvalidationTime_;
 
-  private final HMSNotificationProcessor hmsNotificationProcessor;
-
   CatalogdTableInvalidator(CatalogServiceCatalog catalog, final long unusedTableTtlSec,
       boolean invalidateTableOnMemoryPressure, double oldGenFullThreshold,
       double gcInvalidationFraction) {
@@ -113,8 +111,6 @@ public class CatalogdTableInvalidator {
     lastInvalidationTime_ = TIME_SOURCE.read();
     invalidateTableOnMemoryPressure_ =
         invalidateTableOnMemoryPressure && tryInstallGcListener();
-    //TODO get batchsize from a config
-    hmsNotificationProcessor = new HMSNotificationProcessor(catalog_, 1000);
     daemonThread_ = new Thread(new DaemonThread());
     daemonThread_.setDaemon(true);
     daemonThread_.setName("CatalogTableInvalidator timer");
@@ -287,7 +283,6 @@ public class CatalogdTableInvalidator {
               lastInvalidationTime_ = now;
               scanCount_.incrementAndGet();
             }
-            hmsNotificationProcessor.processHMSNotificationEvents();
             // Wait unusedTableTtlSec if it is configured. Otherwise wait
             // indefinitely.
             TimeUnit.NANOSECONDS.timedWait(CatalogdTableInvalidator.this, sleepTimeNano);

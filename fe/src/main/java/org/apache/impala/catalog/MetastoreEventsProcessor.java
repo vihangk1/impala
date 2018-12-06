@@ -1,42 +1,57 @@
 package org.apache.impala.catalog;
 
 import com.google.common.base.Preconditions;
-import org.apache.calcite.avatica.Meta;
+import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.Database;
-import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.NotificationEventResponse;
-import org.apache.hadoop.hive.metastore.messaging.CreateDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.json.ExtendedJSONMessageFactory;
 import org.apache.hadoop.hive.metastore.messaging.json.JSONCreateDatabaseMessage;
-import org.apache.hadoop.hive.metastore.messaging.json.JSONCreateFunctionMessage;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Reference;
+import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TTableName;
 import org.apache.log4j.Logger;
 import org.apache.thrift.TException;
 
-class HMSNotificationProcessor {
+class MetastoreEventsProcessor {
 
   private static final String MESSAGE_DESERIALIZER_CLASS = ExtendedJSONMessageFactory.class
       .getName();
   private long lastSyncedEventId_ = -1;
   private final CatalogServiceCatalog catalog_;
   private final int eventBatchSize_;
-  public static final Logger LOG = Logger.getLogger(HMSNotificationProcessor.class);
+  private static final Logger LOG = Logger.getLogger(MetastoreEventsProcessor.class);
+  private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
+      new ThreadFactoryBuilder()
+          .setDaemon(true)
+          .setNameFormat("MetastoreEventsProcessor")
+          .build());
 
-  HMSNotificationProcessor(CatalogServiceCatalog catalog, int batchSize) {
+  private static MetastoreEventsProcessor INSTANCE;
+
+  private MetastoreEventsProcessor(CatalogServiceCatalog catalog, int batchSize) {
     Preconditions.checkNotNull(catalog);
     Preconditions.checkArgument(batchSize > 0);
     this.catalog_ = catalog;
     this.eventBatchSize_ = batchSize;
-    //this assumes that when HMSNotificationProcessor is created, catalogD just came
+    //this assumes that when MetastoreEventsProcessor is created, catalogD just came
     //up in which case it already is going to do a full-sync with HMS
     //TODO figure out if CatalogD sync with HMS is in-process or completed so that we know
     //if we need to ignore some of events which are already applied in catalogD
     lastSyncedEventId_ = getCurrentNotificationID();
+    scheduler.scheduleWithFixedDelay(() -> {
+      try {
+        processHMSNotificationEvents();
+      } catch (ImpalaException e) {
+        LOG.warn(String.format("Unexpected exception %s received while processing metastore events", e.getMessage()));
+      }
+    }, 2, 2, TimeUnit.SECONDS);
   }
 
   private long getCurrentNotificationID() {
@@ -50,7 +65,7 @@ class HMSNotificationProcessor {
     return -1;
   }
 
-  public class MetastoreNotificationException extends ImpalaException {
+  static class MetastoreNotificationException extends ImpalaException {
     public MetastoreNotificationException(String msg, Throwable cause) {
       super(msg, cause);
     }
@@ -59,7 +74,7 @@ class HMSNotificationProcessor {
     }
   }
 
-  void processHMSNotificationEvents() throws ImpalaException {
+  private void processHMSNotificationEvents() throws ImpalaException {
     lastSyncedEventId_ = lastSyncedEventId_ == -1 ? getCurrentNotificationID() : lastSyncedEventId_;
     if (lastSyncedEventId_ == -1) {
       LOG.warn("Unable to fetch current notification event id. Cannot sync with metastore");
@@ -104,7 +119,7 @@ class HMSNotificationProcessor {
         if (table != null) {
           //this is possible if the catalog has a stale version of the table
           //for example someone dropped and recreated the table in HMS in the time window
-          //of before instantiating HMSNotificationProcessor and after catalogD loaded the older version
+          //of before instantiating MetastoreEventsProcessor and after catalogD loaded the older version
           //table
           //TODO need to have a solid mechanism (like version numbers) to make sure that table
           //we have is different than the table we received from HMS
@@ -188,5 +203,14 @@ class HMSNotificationProcessor {
     LOG.info(
         "Table " + table.getTableName() + " in database " + table.getDb().getName()
             + " invalidated because the table was recreated in metastore");
+  }
+
+  public static synchronized MetastoreEventsProcessor get(CatalogServiceCatalog catalog,
+      BackendConfig config) {
+    //TODO get config values from backendConf
+    if (INSTANCE == null) {
+      INSTANCE = new MetastoreEventsProcessor(catalog, 1000);
+    }
+    return INSTANCE;
   }
 }
