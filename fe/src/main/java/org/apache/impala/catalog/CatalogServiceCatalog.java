@@ -39,6 +39,7 @@ import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.protocol.CachePoolEntry;
 import org.apache.hadoop.hdfs.protocol.CachePoolInfo;
+import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.impala.authorization.SentryConfig;
@@ -225,7 +226,7 @@ public class CatalogServiceCatalog extends Catalog {
   private final String localLibraryPath_;
 
   private CatalogdTableInvalidator catalogdTableInvalidator_;
-  private final MetastoreEventsProcessor metastoreEventProcessor;
+  private MetastoreEventsProcessor metastoreEventProcessor;
 
   /**
    * See the gflag definition in be/.../catalog-server.cc for details on these modes.
@@ -283,7 +284,16 @@ public class CatalogServiceCatalog extends Catalog {
         BackendConfig.INSTANCE.getBackendCfg().catalog_topic_mode.toUpperCase());
     catalogdTableInvalidator_ = CatalogdTableInvalidator.create(this,
         BackendConfig.INSTANCE);
-    metastoreEventProcessor = MetastoreEventsProcessor.get(this, BackendConfig.INSTANCE);
+    try (MetaStoreClient metaStoreClient  = getMetaStoreClient()) {
+      try {
+        org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId currentNotificationId = metaStoreClient
+            .getHiveClient().getCurrentNotificationEventId();
+        metastoreEventProcessor = MetastoreEventsProcessor.create(this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
+      } catch (TException e) {
+        LOG.error(
+            "Unable to fetch the current notification event id from metastore. Metastore event processing will be disabled.");
+      }
+    }
     Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
   }
 
@@ -2281,6 +2291,10 @@ public class CatalogServiceCatalog extends Catalog {
 
   CatalogdTableInvalidator getCatalogdTableInvalidator() {
     return catalogdTableInvalidator_;
+  }
+
+  MetastoreEventsProcessor getMetastoreEventProcessor() {
+    return metastoreEventProcessor;
   }
 
   @VisibleForTesting
