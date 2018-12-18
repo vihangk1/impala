@@ -142,8 +142,9 @@ class MetastoreEventsProcessor {
         //eg. this could be due to as simple as adding a new parameter or a full blown adding
         //or changing column type
         // detect the special where a table is renamed
-        removeOldTableIfRenamed(event);
-        invalidateCatalogTable(table);
+        if (!processRenameTableEvent(event)) {
+          invalidateCatalogTable(table);
+        }
         break;
       case "DROP_TABLE":
         catalog_.removeTable(dbName, tblName);
@@ -188,13 +189,13 @@ class MetastoreEventsProcessor {
     }
   }
 
-  private boolean removeOldTableIfRenamed(NotificationEvent event) throws MetastoreNotificationException {
-    JSONAlterTableMessage createDatabaseMessage = (JSONAlterTableMessage) messageFactory
+  private boolean processRenameTableEvent(NotificationEvent event) throws MetastoreNotificationException {
+    JSONAlterTableMessage alterTableMessage = (JSONAlterTableMessage) messageFactory
         .getDeserializer().getAlterTableMessage(event.getMessage());
     try {
-      org.apache.hadoop.hive.metastore.api.Table oldTable = createDatabaseMessage
+      org.apache.hadoop.hive.metastore.api.Table oldTable = alterTableMessage
           .getTableObjBefore();
-      org.apache.hadoop.hive.metastore.api.Table newTable = createDatabaseMessage
+      org.apache.hadoop.hive.metastore.api.Table newTable = alterTableMessage
           .getTableObjAfter();
       if (oldTable.getDbName().equalsIgnoreCase(newTable.getDbName()) && oldTable.getTableName()
           .equalsIgnoreCase(newTable.getTableName())) {
@@ -206,6 +207,7 @@ class MetastoreEventsProcessor {
           .format("Found that %s.%s table was renamed. Removing it", oldTable.getDbName(),
               oldTable.getTableName()));
       catalog_.removeTable(oldTable.getDbName(), oldTable.getTableName());
+      catalog_.addTable(newTable.getDbName(), newTable.getTableName());
       return true;
     } catch (Exception e) {
       throw new MetastoreNotificationException(e);
@@ -229,8 +231,8 @@ class MetastoreEventsProcessor {
             String.format(
                 "Database object is null in the event id %d : event message %s. "
                     + "This could be a metastore configuration problem. "
-                    + "Check if hive.metastore.notifications.add.thrift.objects is set in metastore configuration",
-                event.getEventId(), event.getMessage()));
+                    + "Check if %s is set to true in metastore configuration",
+                event.getEventId(), event.getMessage(), METASTORE_NOTIFICATIONS_ADD_THRIFT_OBJECTS));
       }
       return msDb;
     } catch (Exception e) {

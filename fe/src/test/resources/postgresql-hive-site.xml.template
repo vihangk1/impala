@@ -225,5 +225,9 @@
   <name>hive.metastore.notifications.add.thrift.objects</name>
   <value>true</value>
 </property>
+<property>
+  <name>hive.metastore.alter.notifications.basic</name>
+  <value>false</value>
+</property>
 
 </configuration>
