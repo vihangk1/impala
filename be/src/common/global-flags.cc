@@ -242,6 +242,23 @@ DEFINE_bool(invalidate_tables_on_memory_pressure, false, "Configure catalogd to 
     "invalidate_table_timeout_s. To enable this feature, a true flag must be applied to "
     "both catalogd and impalad.");
 
+DEFINE_int32(hms_event_polling_frequency_s, 0,
+    "Configure catalogd to invalidate or refresh "
+    "cached metadata about tables based on metastore events. A non-zero value of this "
+    "flag "
+    "sets the polling interval of catalogd in seconds to fetch new metastore events. A "
+    "value "
+    "of zero disables this feature. When enabled, this flag the same effect as "
+    "\"INVALIDATE METADATA\" statement on the table for certain event types. "
+    "Additionally, "
+    "in case of events which detect creation or removal of objects from metastore, "
+    "catalogd "
+    "adds or removes such objects in its cached metadata. This is independent of time "
+    "and "
+    "and memory based automatic invalidation of tables.To enable this feature, a "
+    "non-zero "
+    "value of the flag must be applied to catalogd and impalad.");
+
 DEFINE_double_hidden(invalidate_tables_gc_old_gen_full_threshold, 0.6, "The threshold "
     "above which CatalogdTableInvalidator would consider the old generation to be almost "
     "full and trigger an invalidation on recently unused tables");

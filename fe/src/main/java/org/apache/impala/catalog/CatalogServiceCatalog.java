@@ -39,6 +39,7 @@ import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.protocol.CachePoolEntry;
 import org.apache.hadoop.hdfs.protocol.CachePoolInfo;
+import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.impala.authorization.SentryConfig;
@@ -225,6 +226,7 @@ public class CatalogServiceCatalog extends Catalog {
   private final String localLibraryPath_;
 
   private CatalogdTableInvalidator catalogdTableInvalidator_;
+  private MetastoreEventsProcessor metastoreEventProcessor;
 
   /**
    * See the gflag definition in be/.../catalog-server.cc for details on these modes.
@@ -282,7 +284,28 @@ public class CatalogServiceCatalog extends Catalog {
         BackendConfig.INSTANCE.getBackendCfg().catalog_topic_mode.toUpperCase());
     catalogdTableInvalidator_ = CatalogdTableInvalidator.create(this,
         BackendConfig.INSTANCE);
+    initializeMetastoreEventProcessor();
     Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
+  }
+
+  /**
+   * Initializes Metastore event processor object if configured. In order to determine if
+   * event polling is enabled, this method looks at the value of HMS polling frequency in
+   * <code>BackendConfig</code>.
+   */
+  private void initializeMetastoreEventProcessor() {
+    try (MetaStoreClient metaStoreClient = getMetaStoreClient()) {
+      try {
+        CurrentNotificationEventId currentNotificationId =
+            metaStoreClient.getHiveClient().getCurrentNotificationEventId();
+        metastoreEventProcessor = MetastoreEventsProcessor.getOrCreate(
+            this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
+      } catch (TException e) {
+        LOG.error(
+            "Unable to fetch the current notification event id from metastore."
+                + "Metastore event processing will be disabled.");
+      }
+    }
   }
 
   // Timeout for acquiring a table lock
@@ -2279,6 +2302,10 @@ public class CatalogServiceCatalog extends Catalog {
 
   CatalogdTableInvalidator getCatalogdTableInvalidator() {
     return catalogdTableInvalidator_;
+  }
+
+  MetastoreEventsProcessor getMetastoreEventProcessor() {
+    return metastoreEventProcessor;
   }
 
   @VisibleForTesting

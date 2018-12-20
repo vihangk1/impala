@@ -219,4 +219,15 @@
   <name>hcatalog.message.factory.impl.json</name>
   <value>org.apache.sentry.binding.metastore.messaging.json.SentryJSONMessageFactory</value>
 </property>
+
+<!-- This property is required to issue invalidates based on metastore events. See IMPALA-7954 for details -->
+<property>
+  <name>hive.metastore.notifications.add.thrift.objects</name>
+  <value>true</value>
+</property>
+<property>
+  <name>hive.metastore.alter.notifications.basic</name>
+  <value>false</value>
+</property>
+
 </configuration>
