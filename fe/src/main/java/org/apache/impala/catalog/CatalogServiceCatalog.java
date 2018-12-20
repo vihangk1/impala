@@ -38,6 +38,8 @@ import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.protocol.CachePoolEntry;
 import org.apache.hadoop.hdfs.protocol.CachePoolInfo;
+import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
 import org.apache.impala.authorization.SentryConfig;
@@ -225,6 +227,9 @@ public class CatalogServiceCatalog extends Catalog {
 
   private CatalogdTableInvalidator catalogdTableInvalidator_;
 
+  // Manages the event processing from metastore for issuing invalidates on tables
+  private MetastoreEventsProcessor metastoreEventProcessor_;
+
   /**
    * See the gflag definition in be/.../catalog-server.cc for details on these modes.
    */
@@ -281,7 +286,42 @@ public class CatalogServiceCatalog extends Catalog {
         BackendConfig.INSTANCE.getBackendCfg().catalog_topic_mode.toUpperCase());
     catalogdTableInvalidator_ = CatalogdTableInvalidator.create(this,
         BackendConfig.INSTANCE);
+    initializeMetastoreEventProcessor();
     Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
+    // start polling for metastore events
+    if (metastoreEventProcessor_ != null) {
+      metastoreEventProcessor_.start();
+    }
+  }
+
+  /**
+   * Initializes Metastore event processor object if
+   * <code>BackendConfig#getHMSPollingFrequencyInSeconds</code> returns a non-zero
+   *.value of polling interval. It is important to fetch the current notification
+   * event id at the Catalog service initialization time so that event processor
+   * starts to sync at the event id corresponding to the catalog start time.
+   */
+  private void initializeMetastoreEventProcessor() throws ImpalaException {
+    long eventPollingInterval = BackendConfig.INSTANCE.getHMSPollingFrequencyInSeconds();
+    if (BackendConfig.INSTANCE.getHMSPollingFrequencyInSeconds() <= 0) {
+      LOG.info(String.format("Metastore event processing is disabled. Event polling "
+              + "interval is %d",
+          eventPollingInterval));
+      return;
+    }
+    try (MetaStoreClient metaStoreClient = getMetaStoreClient()) {
+      CurrentNotificationEventId currentNotificationId =
+          metaStoreClient.getHiveClient().getCurrentNotificationEventId();
+      metastoreEventProcessor_ = MetastoreEventsProcessor.getOrCreate(
+          this, currentNotificationId.getEventId(), eventPollingInterval);
+    } catch (TException e) {
+      LOG.fatal("Unable to fetch the current notification event id from metastore."
+              + "Metastore event processing will be disabled.",
+          e);
+      throw new CatalogException("Fatal error while initializing metastore event "
+              + "processor",
+          e);
+    }
   }
 
   // Timeout for acquiring a table lock
@@ -1239,6 +1279,25 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   /**
+   * Adds a database name to the metadata cache if not exists and returns the
+   * true is a new Db Object was added. Used by MetastoreEventProcessor to handle
+   * CREATE_DATABASE events
+   */
+  public boolean addDbIfNotExists(
+      String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
+    versionLock_.writeLock().lock();
+    try {
+      Db db = getDb(dbName);
+      if (db == null) {
+        return addDb(dbName, msDb) != null;
+      }
+      return false;
+    } finally {
+      versionLock_.writeLock().unlock();
+    }
+  }
+
+  /**
    * Removes a database from the metadata cache and returns the removed database,
    * or null if the database did not exist in the cache.
    * Used by DROP DATABASE statements.
@@ -1275,6 +1334,36 @@ public class CatalogServiceCatalog extends Catalog {
     }
     db.setCatalogVersion(incrementAndGetCatalogVersion());
     deleteLog_.addRemovedObject(db.toTCatalogObject());
+  }
+
+  /**
+   * Adds table with the given db and table name to the catalog if it does not exists.
+   * Sets tblWasFound reference if the table exists in the catalog already.
+   * @return null
+   */
+  public Table addTableIfNotExists(String dbName, String tblName,
+      Reference<Boolean> dbWasFound, Reference<Boolean> tblWasFound) {
+    tblWasFound.setRef(false);
+    dbWasFound.setRef(false);
+    Db db = getDb(dbName);
+    if (db == null) return null;
+
+    dbWasFound.setRef(true);
+    Table incompleteTable = IncompleteTable.createUninitializedTable(db, tblName);
+    versionLock_.writeLock().lock();
+    try {
+      Table existingTable = db.getTable(tblName);
+      if (existingTable != null) {
+        tblWasFound.setRef(true);
+        return existingTable;
+      } else {
+        incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
+        db.addTable(incompleteTable);
+        return incompleteTable;
+      }
+    } finally {
+      versionLock_.writeLock().unlock();
+    }
   }
 
   /**
@@ -1353,6 +1442,48 @@ public class CatalogServiceCatalog extends Catalog {
       updatedTbl.setCatalogVersion(incrementAndGetCatalogVersion());
       db.addTable(updatedTbl);
       return updatedTbl;
+    } finally {
+      versionLock_.writeLock().unlock();
+    }
+  }
+
+  /**
+   * Remove a catalog table based on the given metastore table if it exists and its
+   * createTime matches with the metastore table
+   *
+   * @param msTable Metastore table to be used to remove Table
+   * @param tblWasfound is set to true if the table was found in the catalog
+   * @param tblMatched is set to true if the table is found and it matched with the
+   * createTime of the cached metastore table in catalog or if the existing table is a
+   * incomplete table
+   * @return Removed table object. Return null if the table was not removed
+   */
+  public Table removeTableIfExists(org.apache.hadoop.hive.metastore.api.Table msTable,
+      Reference<Boolean> tblWasfound, Reference<Boolean> tblMatched) {
+    tblWasfound.setRef(false);
+    tblMatched.setRef(false);
+    Db db = getDb(msTable.getDbName());
+    if (db == null) return null;
+    // make sure that the createTime of the input table is valid
+    Preconditions.checkState(msTable.getCreateTime() > 0);
+    versionLock_.writeLock().lock();
+    try {
+      Table tblToBeRemoved = db.getTable(msTable.getTableName());
+      if (tblToBeRemoved == null) return null;
+      tblWasfound.setRef(true);
+      // make sure that you are removing the same instance of the table object which
+      // is given by comparing the metastore createTime. In case the found table is a
+      // Incomplete table remove it
+      if (tblToBeRemoved instanceof IncompleteTable
+          || (msTable.getCreateTime()
+                 == tblToBeRemoved.getMetaStoreTable().getCreateTime())) {
+        tblMatched.setRef(true);
+        Table removedTbl = db.removeTable(tblToBeRemoved.getName());
+        removedTbl.setCatalogVersion(incrementAndGetCatalogVersion());
+        deleteLog_.addRemovedObject(removedTbl.toMinimalTCatalogObject());
+        return removedTbl;
+      }
+      return null;
     } finally {
       versionLock_.writeLock().unlock();
     }
@@ -1649,6 +1780,29 @@ public class CatalogServiceCatalog extends Catalog {
     return newTable.toTCatalogObject();
   }
 
+  /**
+   * Invalidate the table if it exists by overwriting existing entry by a Incomplete
+   * Table.
+   * @return null if the table does not exist else return the invalidated table
+   */
+  public Table invalidateTableIfExists(String dbName, String tblName) {
+    Db db = getDb(dbName);
+    if (db == null) return null;
+    Table incompleteTable = IncompleteTable.createUninitializedTable(db, tblName);
+    versionLock_.writeLock().lock();
+    try {
+      if (!db.containsTable(tblName)) return null;
+      incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
+      db.addTable(incompleteTable);
+    } finally {
+      versionLock_.writeLock().unlock();
+    }
+    if (loadInBackground_) {
+      tableLoadingMgr_.backgroundLoad(
+          new TTableName(dbName.toLowerCase(), tblName.toLowerCase()));
+    }
+    return db.getTable(tblName);
+  }
   /**
    * Adds a new role with the given name and grant groups to the AuthorizationPolicy.
    * If a role with the same name already exists it will be overwritten.
