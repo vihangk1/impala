@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.apache.commons.codec.binary.Base64;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TCompactProtocol;
@@ -92,9 +93,15 @@ public class Db extends CatalogObjectImpl implements FeDb {
 
   public Db(String name, org.apache.hadoop.hive.metastore.api.Database msDb) {
     thriftDb_ = new TDatabase(name.toLowerCase());
-    thriftDb_.setMetastore_db(msDb);
+    setMSDb(msDb);
     tableCache_ = new CatalogObjectCache<Table>();
     functions_ = new HashMap<String, List<Function>>();
+  }
+
+  public void setMSDb(Database msDb) {
+    synchronized (thriftDb_) {
+      thriftDb_.setMetastore_db(msDb);
+    }
   }
 
   public void setIsSystemDb(boolean b) { isSystemDb_ = b; }
@@ -110,12 +117,14 @@ public class Db extends CatalogObjectImpl implements FeDb {
    * Updates the hms parameters map by adding the input <k,v> pair.
    */
   private void putToHmsParameters(String k, String v) {
-    org.apache.hadoop.hive.metastore.api.Database msDb = thriftDb_.metastore_db;
-    Preconditions.checkNotNull(msDb);
-    Map<String, String> hmsParams = msDb.getParameters();
-    if (hmsParams == null) hmsParams = Maps.newHashMap();
-    hmsParams.put(k,v);
-    msDb.setParameters(hmsParams);
+    synchronized (thriftDb_) {
+      org.apache.hadoop.hive.metastore.api.Database msDb = thriftDb_.metastore_db;
+      Preconditions.checkNotNull(msDb);
+      Map<String, String> hmsParams = msDb.getParameters();
+      if (hmsParams == null) hmsParams = Maps.newHashMap();
+      hmsParams.put(k,v);
+      msDb.setParameters(hmsParams);
+    }
   }
 
   /**
@@ -124,18 +133,33 @@ public class Db extends CatalogObjectImpl implements FeDb {
    * corresponding to input k and it is removed, false otherwise.
    */
   private boolean removeFromHmsParameters(String k) {
-    org.apache.hadoop.hive.metastore.api.Database msDb = thriftDb_.metastore_db;
-    Preconditions.checkNotNull(msDb);
-    if (msDb.getParameters() == null) return false;
-    return msDb.getParameters().remove(k) != null;
+    synchronized (thriftDb_) {
+      org.apache.hadoop.hive.metastore.api.Database msDb = thriftDb_.metastore_db;
+      Preconditions.checkNotNull(msDb);
+      if (msDb.getParameters() == null) return false;
+      return msDb.getParameters().remove(k) != null;
+    }
   }
 
   @Override // FeDb
   public boolean isSystemDb() { return isSystemDb_; }
+
   @Override // FeDb
-  public TDatabase toThrift() { return thriftDb_; }
+  public TDatabase toThrift() {
+    // take a lock and return a copy of thriftDb since there are other
+    // methods which modify its state to avoid race conditions
+    synchronized (thriftDb_) {
+      return thriftDb_.deepCopy();
+    }
+  }
+
   @Override // FeDb
-  public String getName() { return thriftDb_.getDb_name(); }
+  public String getName() {
+    synchronized (thriftDb_) {
+      return thriftDb_.getDb_name();
+    }
+  }
+
   @Override
   public TCatalogObjectType getCatalogObjectType() { return TCatalogObjectType.DATABASE; }
 
@@ -192,7 +216,9 @@ public class Db extends CatalogObjectImpl implements FeDb {
 
   @Override // FeDb
   public org.apache.hadoop.hive.metastore.api.Database getMetaStoreDb() {
-    return thriftDb_.getMetastore_db();
+    synchronized (thriftDb_) {
+      return thriftDb_.getMetastore_db();
+    }
   }
 
   @Override // FeDb

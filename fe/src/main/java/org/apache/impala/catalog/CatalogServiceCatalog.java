@@ -284,17 +284,27 @@ public class CatalogServiceCatalog extends Catalog {
         BackendConfig.INSTANCE.getBackendCfg().catalog_topic_mode.toUpperCase());
     catalogdTableInvalidator_ = CatalogdTableInvalidator.create(this,
         BackendConfig.INSTANCE);
+    initializeMetastoreEventProcessor();
+    Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
+  }
+
+  /**
+   * Initializes Metastore event processor object if configured. In order to determine if event
+   * polling is enabled, this method looks at the value of HMS polling frequency in
+   * <code>BackendConfig</code>.
+   */
+  private void initializeMetastoreEventProcessor() {
     try (MetaStoreClient metaStoreClient  = getMetaStoreClient()) {
       try {
-        org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId currentNotificationId = metaStoreClient
+        CurrentNotificationEventId currentNotificationId = metaStoreClient
             .getHiveClient().getCurrentNotificationEventId();
-        metastoreEventProcessor = MetastoreEventsProcessor.create(this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
+        metastoreEventProcessor = MetastoreEventsProcessor
+            .create(this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
       } catch (TException e) {
         LOG.error(
             "Unable to fetch the current notification event id from metastore. Metastore event processing will be disabled.");
       }
     }
-    Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
   }
 
   // Timeout for acquiring a table lock
