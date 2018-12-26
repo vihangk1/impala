@@ -226,7 +226,9 @@ public class CatalogServiceCatalog extends Catalog {
   private final String localLibraryPath_;
 
   private CatalogdTableInvalidator catalogdTableInvalidator_;
-  private MetastoreEventsProcessor metastoreEventProcessor;
+
+  // Manages the event processing from metastore for issuing invalidates on tables
+  private MetastoreEventsProcessor metastoreEventProcessor_;
 
   /**
    * See the gflag definition in be/.../catalog-server.cc for details on these modes.
@@ -289,21 +291,29 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   /**
-   * Initializes Metastore event processor object if configured. In order to determine if
-   * event polling is enabled, this method looks at the value of HMS polling frequency in
-   * <code>BackendConfig</code>.
+   * Initializes Metastore event processor object if 
+   * <code>BackendConfig#getHMSPollingFrequencyInSeconds</code> returns a non-zero
+   *.value of polling interval. It is important to fetch the current notification
+   * event id at the Catalog service initialization time so that event processor
+   * starts to sync at the event id corresponding to the catalog start time.
    */
   private void initializeMetastoreEventProcessor() {
+    long eventPollingInterval = BackendConfig.INSTANCE.getHMSPollingFrequencyInSeconds();
+    if (BackendConfig.INSTANCE.getHMSPollingFrequencyInSeconds() <= 0) {
+      LOG.debug(String.format("Metastore event processing is disabled. Event polling "
+           + "interval is %d", eventPollingInterval));
+      return;
+    }
     try (MetaStoreClient metaStoreClient = getMetaStoreClient()) {
       try {
         CurrentNotificationEventId currentNotificationId =
             metaStoreClient.getHiveClient().getCurrentNotificationEventId();
-        metastoreEventProcessor = MetastoreEventsProcessor.getOrCreate(
+        metastoreEventProcessor_ = MetastoreEventsProcessor.getOrCreate(
             this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
       } catch (TException e) {
         LOG.error(
             "Unable to fetch the current notification event id from metastore."
-                + "Metastore event processing will be disabled.");
+                + "Metastore event processing will be disabled.", e);
       }
     }
   }
@@ -2305,7 +2315,7 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   MetastoreEventsProcessor getMetastoreEventProcessor() {
-    return metastoreEventProcessor;
+    return metastoreEventProcessor_;
   }
 
   @VisibleForTesting
