@@ -382,16 +382,15 @@ class MetastoreEventsProcessor {
    * belongs
    * @param startSyncFromId Start event id. Events will be polled starting from this event
    * id
-   * @param config BackendConfiguration object to get the hms_event_polling_frequency_s
-   * value
+   * @param eventPollingInterval HMS polling interval in seconds
    * @return this object is already created, or create a new one if it is not yet
    * instantiated
    */
   public static synchronized MetastoreEventsProcessor getOrCreate(
-      CatalogServiceCatalog catalog, long startSyncFromId, BackendConfig config) {
+      CatalogServiceCatalog catalog, long startSyncFromId, long eventPollingInterval) {
     if (INSTANCE == null) {
       INSTANCE = new MetastoreEventsProcessor(
-          catalog, startSyncFromId, config.getHMSPollingFrequencyInSeconds());
+          catalog, startSyncFromId, eventPollingInterval);
     }
     return INSTANCE;
   }

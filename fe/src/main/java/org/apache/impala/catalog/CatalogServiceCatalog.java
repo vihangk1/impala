@@ -309,7 +309,7 @@ public class CatalogServiceCatalog extends Catalog {
         CurrentNotificationEventId currentNotificationId =
             metaStoreClient.getHiveClient().getCurrentNotificationEventId();
         metastoreEventProcessor_ = MetastoreEventsProcessor.getOrCreate(
-            this, currentNotificationId.getEventId(), BackendConfig.INSTANCE);
+            this, currentNotificationId.getEventId(), eventPollingInterval);
       } catch (TException e) {
         LOG.error(
             "Unable to fetch the current notification event id from metastore."

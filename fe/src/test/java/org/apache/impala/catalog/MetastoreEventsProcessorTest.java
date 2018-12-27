@@ -66,7 +66,11 @@ public class MetastoreEventsProcessorTest {
   @BeforeClass
   public static void setUpTestEnvironment() throws TException {
     catalog = CatalogServiceTestCatalog.create();
-    eventsProcessor = catalog.getMetastoreEventProcessor();
+    try (MetaStoreClient metaStoreClient = catalog.getMetaStoreClient()) {
+      CurrentNotificationEventId currentNotificationId =
+          metaStoreClient.getHiveClient().getCurrentNotificationEventId();
+      eventsProcessor = MetastoreEventsProcessor.getOrCreate(catalog, currentNotificationId.getEventId(), 0L);
+    }
   }
 
   @AfterClass
