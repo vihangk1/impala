@@ -115,6 +115,9 @@ public final class Metrics {
           snapshotToString(entry.getValue().getSnapshot()));
       result.append("\n");
     }
+    for (Entry<String, Meter> entry : registry_.getMeters().entrySet()) {
+      result.append(entry.getKey()).append(":").append(meterToString(entry.getValue()));
+    }
     return result.toString();
   }
 
@@ -133,6 +136,19 @@ public final class Metrics {
   }
 
   /**
+   * Helper method to pretty print the contents of a Meter
+   */
+  private String meterToString(Meter meter) {
+    StringBuilder builder = new StringBuilder();
+    return builder.append("\n\tCount: ").append(meter.getCount()).append("\n")
+        .append("\tMean rate: ").append(meter.getMeanRate()).append("\n")
+        .append("\t1min rate: ").append(meter.getOneMinuteRate()).append("\n")
+        .append("\t5min rate: " ).append(meter.getFiveMinuteRate()).append("\n")
+        .append("\t15min rate: " ).append(meter.getFifteenMinuteRate()).append("\n")
+        .toString();
+  }
+
+  /**
    * Helper function that pretty prints the contents of a metric snapshot.
    */
   private String snapshotToString(Snapshot snapshot) {
@@ -146,4 +162,5 @@ public final class Metrics {
         .append("\t99th-% (msec): " + snapshot.get99thPercentile() / 1000000 + "\n")
         .toString();
   }
+
 }

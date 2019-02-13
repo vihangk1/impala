@@ -29,6 +29,7 @@
 #include "gen-cpp/CatalogInternalService_types.h"
 #include "gen-cpp/CatalogObjects_types.h"
 #include "gen-cpp/CatalogService_types.h"
+#include "util/event-metrics.h"
 
 #include "common/names.h"
 
@@ -90,6 +91,8 @@ const string CATALOG_OBJECT_WEB_PAGE = "/catalog_object";
 const string CATALOG_OBJECT_TEMPLATE = "catalog_object.tmpl";
 const string TABLE_METRICS_WEB_PAGE = "/table_metrics";
 const string TABLE_METRICS_TEMPLATE = "table_metrics.tmpl";
+const string EVENT_WEB_PAGE = "/events";
+const string EVENT_METRICS_TEMPLATE = "events.tmpl";
 
 const int REFRESH_METRICS_INTERVAL_MS = 1000;
 
@@ -288,6 +291,9 @@ void CatalogServer::RegisterWebpages(Webserver* webserver) {
   webserver->RegisterUrlCallback(TABLE_METRICS_WEB_PAGE, TABLE_METRICS_TEMPLATE,
       [this](const auto& args, auto* doc) { this->TableMetricsUrlCallback(args, doc); },
       false);
+  webserver->RegisterUrlCallback(EVENT_WEB_PAGE, EVENT_METRICS_TEMPLATE,
+       [this](const auto& args, auto* doc) { this->EventMetricsUrlCallback(args, doc); },
+       false);
   RegisterLogLevelCallbacks(webserver, true);
 }
 
@@ -390,6 +396,13 @@ void CatalogServer::UpdateCatalogTopicCallback(
     }
     partial_fetch_rpc_queue_len_metric_->SetValue(
         response.catalog_partial_fetch_rpc_queue_len);
+    TGetEventProcessorMetricsResponse eventProcessorMetricsResponse;
+    status = catalog_->GetEventProcessorMetrics(&eventProcessorMetricsResponse);
+    if (!status.ok()) {
+      LOG(ERROR) << "Error refreshing metastore event metrics: " << status.GetDetail();
+      continue;
+    }
+    MetastoreEventMetrics::refresh(&eventProcessorMetricsResponse);
   }
 }
 
@@ -503,6 +516,23 @@ void CatalogServer::GetCatalogUsage(Document* document) {
   num_frequent_tables.SetInt(catalog_usage_result.frequently_accessed_tables.size());
   document->AddMember("num_frequent_tables", num_frequent_tables,
       document->GetAllocator());
+}
+
+
+void CatalogServer::EventMetricsUrlCallback(const Webserver::ArgumentMap& args,
+        Document* document) {
+  TGetEventProcessorMetricsResponse event_processor_metrics_response;
+  Status status = catalog_->GetEventProcessorMetrics(&event_processor_metrics_response);
+  if (!status.ok()) {
+    Value error(status.GetDetail().c_str(), document->GetAllocator());
+    document->AddMember("error", error, document->GetAllocator());
+    return;
+  }
+
+  Value event_processor_status(event_processor_metrics_response.status.c_str(), document->GetAllocator());
+  document->AddMember("event_processor_status", event_processor_status, document->GetAllocator());
+  Value event_metrics(event_processor_metrics_response.summary.c_str(), document->GetAllocator());
+  document->AddMember("event_processor_metrics", event_metrics, document->GetAllocator());
 }
 
 void CatalogServer::CatalogObjectsUrlCallback(const Webserver::ArgumentMap& args,

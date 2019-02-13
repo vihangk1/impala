@@ -18,6 +18,7 @@
 package org.apache.impala.catalog.events;
 
 import org.apache.impala.catalog.CatalogException;
+import org.apache.impala.thrift.TGetEventProcessorMetricsResponse;
 
 /**
  * Interface to process external events
@@ -51,4 +52,6 @@ public interface ExternalEventsProcessor {
    * Implements the core logic of processing external events
    */
   void processEvents();
+
+  TGetEventProcessorMetricsResponse getEventProcessorMetrics();
 }

@@ -37,6 +37,7 @@
 #include "util/network-util.h"
 #include "util/openssl-util.h"
 #include "util/webserver.h"
+#include "util/event-metrics.h"
 
 DECLARE_string(classpath);
 DECLARE_string(principal);
@@ -82,6 +83,7 @@ int CatalogdMain(int argc, char** argv) {
   metrics->AddProperty<string>("catalog.version", GetVersionString(true));
 
   CommonMetrics::InitCommonMetrics(metrics.get());
+  MetastoreEventMetrics::InitMetastoreEventMetrics(metrics.get());
 
   CatalogServer catalog_server(metrics.get());
   ABORT_IF_ERROR(catalog_server.Start());

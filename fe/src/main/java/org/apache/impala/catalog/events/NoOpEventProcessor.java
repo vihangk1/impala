@@ -17,6 +17,9 @@
 
 package org.apache.impala.catalog.events;
 
+import org.apache.impala.catalog.events.MetastoreEventsProcessor.EventProcessorStatus;
+import org.apache.impala.thrift.TGetEventProcessorMetricsResponse;
+
 /**
  * A simple no-op events processor which does nothing. Used to plugin to the catalog
  * when event processing is disabled so that we don't have to do a null check every
@@ -58,5 +61,12 @@ public class NoOpEventProcessor implements ExternalEventsProcessor {
   @Override
   public void processEvents() {
     // no-op
+  }
+
+  @Override
+  public TGetEventProcessorMetricsResponse getEventProcessorMetrics() {
+    TGetEventProcessorMetricsResponse response = new TGetEventProcessorMetricsResponse();
+    response.setStatus(EventProcessorStatus.STOPPED.toString());
+    return response;
   }
 }

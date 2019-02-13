@@ -74,6 +74,7 @@ import org.apache.impala.thrift.TDdlExecRequest;
 import org.apache.impala.thrift.TDdlType;
 import org.apache.impala.thrift.TDropDbParams;
 import org.apache.impala.thrift.TDropTableOrViewParams;
+import org.apache.impala.thrift.TGetEventProcessorMetricsResponse;
 import org.apache.impala.thrift.THdfsFileFormat;
 import org.apache.impala.thrift.TPrimitiveType;
 import org.apache.impala.thrift.TScalarType;
@@ -158,6 +159,7 @@ public class MetastoreEventsProcessorTest {
     // reset the event processor to the current eventId
     eventsProcessor_.stop();
     eventsProcessor_.start(eventsProcessor_.getCurrentEventId());
+    eventsProcessor_.processEvents();
     assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
   }
 
@@ -882,7 +884,7 @@ public class MetastoreEventsProcessorTest {
         createFakeAlterTableNotification(dbName, tblName, tableBefore, tableAfter);
 
     AlterTableEvent alterTableEvent =
-        new AlterTableEvent(fakeCatalog, fakeAlterTableNotification);
+        new AlterTableEvent(fakeCatalog, eventsProcessor_.getMetrics(), fakeAlterTableNotification);
     Assert.assertFalse("Alter table which " + "changes the flags should not be skipped. "
             + printFlagTransistions(dbFlag, tblFlagTransition),
         alterTableEvent.isEventProcessingDisabled());
@@ -893,7 +895,7 @@ public class MetastoreEventsProcessorTest {
         getTestTable(dbName, tblName, afterParams, false);
     NotificationEvent nextNotification =
         createFakeAlterTableNotification(dbName, tblName, tableAfter, nextTable);
-    alterTableEvent = new AlterTableEvent(fakeCatalog, nextNotification);
+    alterTableEvent = new AlterTableEvent(fakeCatalog, eventsProcessor_.getMetrics(), nextNotification);
     if (shouldNextEventBeSkipped) {
       assertTrue("Alter table event should not skipped following this table flag "
               + "transition. " + printFlagTransistions(dbFlag, tblFlagTransition),
@@ -929,6 +931,40 @@ public class MetastoreEventsProcessorTest {
         .append(" -> ")
         .append(tblFlagTransition.second)
         .toString();
+  }
+
+  /**
+   * Test generates some events and makes sure that the metrics match with expected
+   * number of events
+   */
+  @Test
+  public void testEventProcessorMetrics() throws TException {
+    // event 1
+    createDatabase();
+    Map<String, String> tblParams = new HashMap<>(1);
+    tblParams.put(MetastoreEvents.DISABLE_EVENT_HMS_SYNC_KEY, "true");
+    // event 2
+    createTable(TEST_DB_NAME, "tbl_should_skipped", tblParams, true);
+    // event 3
+    createTable(TEST_DB_NAME, TEST_TABLE_NAME_PARTITIONED, null, true);
+    List<List<String>> partitionVals = new ArrayList<>();
+    partitionVals.add(Arrays.asList("1"));
+    partitionVals.add(Arrays.asList("2"));
+    partitionVals.add(Arrays.asList("3"));
+    // event 4
+    addPartitions(TEST_DB_NAME, "tbl_should_skipped", partitionVals);
+    // event 5
+    addPartitions(TEST_DB_NAME, TEST_TABLE_NAME_PARTITIONED, partitionVals);
+    eventsProcessor_.processEvents();
+    TGetEventProcessorMetricsResponse response = eventsProcessor_.getEventProcessorMetrics();
+    assertEquals(EventProcessorStatus.ACTIVE.toString(), response.getStatus());
+    assertEquals(5, response.getEvents_received());
+    // two events on tbl which is skipped
+    assertEquals(2, response.getEvents_skipped());
+    assertTrue("Event fetch duration should be greater than zero",
+        response.getEvents_fetch_duration_mean() > 0);
+    assertTrue("Event process duration should be greater than zero",
+        response.getEvents_process_duration_mean() > 0);
   }
 
   /**

@@ -63,6 +63,7 @@ import org.apache.impala.thrift.TCatalogUpdateResult;
 import org.apache.impala.thrift.TDatabase;
 import org.apache.impala.thrift.TFunction;
 import org.apache.impala.thrift.TGetCatalogUsageResponse;
+import org.apache.impala.thrift.TGetEventProcessorMetricsResponse;
 import org.apache.impala.thrift.TGetPartialCatalogObjectRequest;
 import org.apache.impala.thrift.TGetPartialCatalogObjectResponse;
 import org.apache.impala.thrift.TGetPartitionStatsRequest;
@@ -2365,6 +2366,9 @@ public class CatalogServiceCatalog extends Catalog {
     return usage;
   }
 
+  public TGetEventProcessorMetricsResponse getEventProcessorMetrics() {
+    return metastoreEventProcessor_.getEventProcessorMetrics();
+  }
   /**
    * Retrieves the stored metrics of the specified table and returns a pretty-printed
    * string representation. Throws an exception if table metrics were not available

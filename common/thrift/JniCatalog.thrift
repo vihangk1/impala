@@ -754,3 +754,24 @@ struct TGetCatalogServerMetricsResponse {
 struct TCopyTestCaseReq {
   1: required string input_path
 }
+
+struct TGetEventProcessorMetricsResponse{
+  // status of event processor
+  1: required string status
+  // Total number of events received so far
+  2: optional i64 events_received
+  // Total number of events skipped so far
+  3: optional i64 events_skipped
+  // Mean time in sec for the fetching metastore events
+  4: optional double events_fetch_duration_mean
+  // Mean time in sec for processing a given batch of events
+  5: optional double events_process_duration_mean
+  // Average number of events received in 1 min
+  6: optional double events_received_1min_rate
+  7: optional double events_received_5min_rate
+  8: optional double events_received_15min_rate
+  // Average number events skipped in a polling interval
+  9: optional double events_skipped_per_poll_mean
+  // Summary of the event processor metrics which include status and more detailed metrics
+  10: optional string summary
+}

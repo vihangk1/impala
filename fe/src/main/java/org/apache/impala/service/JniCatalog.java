@@ -312,6 +312,11 @@ public class JniCatalog {
     return serializer.serialize(catalog_.getCatalogUsage());
   }
 
+  public byte[] getEventProcessorMetrics() throws TException {
+    TSerializer serializer = new TSerializer(protocolFactory_);
+    return serializer.serialize(catalog_.getEventProcessorMetrics());
+  }
+
   public void updateTableUsage(byte[] req) throws ImpalaException {
     TUpdateTableUsageRequest thriftReq = new TUpdateTableUsageRequest();
     JniUtil.deserializeThrift(protocolFactory_, thriftReq, req);

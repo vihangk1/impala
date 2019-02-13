@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog.events;
 
+import com.codahale.metrics.Timer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
@@ -35,8 +36,11 @@ import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEvent;
 import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventFactory;
-import org.apache.log4j.Logger;
+import org.apache.impala.common.Metrics;
+import org.apache.impala.thrift.TGetEventProcessorMetricsResponse;
 import org.apache.thrift.TException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * A metastore event is a instance of the class
@@ -131,7 +135,9 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
 
   public static final String HMS_ADD_THRIFT_OBJECTS_IN_EVENTS_CONFIG_KEY =
       "hive.metastore.notifications.add.thrift.objects";
-  private static final Logger LOG = Logger.getLogger(MetastoreEventsProcessor.class);
+
+  private static final Logger LOG =
+      LoggerFactory.getLogger(MetastoreEventsProcessor.class);
   // Use ExtendedJSONMessageFactory to deserialize the event messages.
   // ExtendedJSONMessageFactory adds additional information over JSONMessageFactory so
   // that events are compatible with Sentry
@@ -144,6 +150,15 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
 
   // maximum number of events to poll in each RPC
   private static final int EVENTS_BATCH_SIZE_PER_RPC = 1000;
+
+  // time taken to fetch events during each poll
+  public static final String EVENTS_FETCH_DURATION_METRIC = "events-fetch-duration";
+  // time taken to apply all the events received duration each poll
+  public static final String EVENTS_PROCESS_DURATION_METRIC = "events-apply-duration";
+  // rate of events received per unit time
+  public static final String EVENTS_RECEIVED_METRIC = "events-received";
+  // total number of events which are skipped because of the flag setting
+  public static final String EVENTS_SKIPPED_METRIC = "events-skipped";
 
   // possible status of event processor
   public enum EventProcessorStatus {
@@ -174,14 +189,25 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
       .newSingleThreadScheduledExecutor(new ThreadFactoryBuilder().setDaemon(true)
           .setNameFormat("MetastoreEventsProcessor").build());
 
+  // metrics registry to keep track of metrics related to event processing
+  private final Metrics metrics_ = new Metrics();
+
   @VisibleForTesting
   MetastoreEventsProcessor(CatalogServiceCatalog catalog, long startSyncFromId,
       long pollingFrequencyInSec) {
     Preconditions.checkState(pollingFrequencyInSec > 0);
     this.catalog_ = Preconditions.checkNotNull(catalog);
     lastSyncedEventId_ = startSyncFromId;
-    metastoreEventFactory_ = new MetastoreEventFactory(catalog_);
+    metastoreEventFactory_ = new MetastoreEventFactory(catalog_, metrics_);
     pollingFrequencyInSec_ = pollingFrequencyInSec;
+    initMetrics();
+  }
+
+  private void initMetrics() {
+    metrics_.addTimer(EVENTS_FETCH_DURATION_METRIC);
+    metrics_.addTimer(EVENTS_PROCESS_DURATION_METRIC);
+    metrics_.addMeter(EVENTS_RECEIVED_METRIC);
+    metrics_.addCounter(EVENTS_SKIPPED_METRIC);
   }
 
   /**
@@ -277,6 +303,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   @VisibleForTesting
   protected List<NotificationEvent> getNextMetastoreEvents()
       throws MetastoreNotificationFetchException {
+    final Timer.Context context =
+        metrics_.getTimer(EVENTS_FETCH_DURATION_METRIC).time();
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       // fetch the current notification event id. We assume that the polling interval
       // is small enough that most of these polling operations result in zero new
@@ -301,6 +329,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
       throw new MetastoreNotificationFetchException(
           "Unable to fetch notifications from metastore. Last synced event id is "
               + lastSyncedEventId_, e);
+    } finally {
+      context.stop();
     }
   }
 
@@ -338,6 +368,50 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   }
 
   /**
+   * Gets the current event processor metrics along with its status. If the status is
+   * not active the metrics are skipped. Only the summary and status is sent
+   */
+  @Override
+  public TGetEventProcessorMetricsResponse getEventProcessorMetrics() {
+    TGetEventProcessorMetricsResponse response = new TGetEventProcessorMetricsResponse();
+    EventProcessorStatus currentStatus = getStatus();
+    response.setStatus(currentStatus.toString());
+    response.setSummary(metrics_.toString());
+    if (currentStatus != EventProcessorStatus.ACTIVE) return response;
+
+    long eventsReceived = metrics_.getMeter(EVENTS_RECEIVED_METRIC).getCount();
+    long eventsSkipped = metrics_.getCounter(EVENTS_SKIPPED_METRIC).getCount();
+    double avgFetchDuration =
+        metrics_.getTimer(EVENTS_FETCH_DURATION_METRIC).getMeanRate();
+    double avgProcessDuration =
+        metrics_.getTimer(EVENTS_PROCESS_DURATION_METRIC).getMeanRate();
+    double avgNumberOfEventsReceived1Min =
+        metrics_.getMeter(EVENTS_RECEIVED_METRIC).getOneMinuteRate();
+    double avgNumberOfEventsReceived5Min =
+        metrics_.getMeter(EVENTS_RECEIVED_METRIC).getFiveMinuteRate();
+    double avgNumberOfEventsReceived15Min =
+        metrics_.getMeter(EVENTS_RECEIVED_METRIC).getFifteenMinuteRate();
+
+    response.setEvents_received(eventsReceived);
+    response.setEvents_skipped(eventsSkipped);
+    response.setEvents_fetch_duration_mean(avgFetchDuration);
+    response.setEvents_process_duration_mean(avgProcessDuration);
+    response.setEvents_received_1min_rate(avgNumberOfEventsReceived1Min);
+    response.setEvents_received_5min_rate(avgNumberOfEventsReceived5Min);
+    response.setEvents_received_15min_rate(avgNumberOfEventsReceived15Min);
+
+    LOG.trace("Events Received: {} Events skipped: {} Avg fetch duration: {} Avg process "
+            + "duration: {} Events received rate (1min) : {}", eventsReceived, eventsSkipped,
+        avgFetchDuration, avgProcessDuration, avgNumberOfEventsReceived1Min);
+    return response;
+  }
+
+  @VisibleForTesting
+  Metrics getMetrics() {
+    return metrics_;
+  }
+
+  /**
    * Process the given list of notification events. Useful for tests which provide a list
    * of events
    *
@@ -346,9 +420,12 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   @VisibleForTesting
   protected void processEvents(List<NotificationEvent> events)
       throws MetastoreNotificationException {
+    metrics_.getMeter(EVENTS_RECEIVED_METRIC).mark(events.size());
     List<MetastoreEvent> filteredEvents =
         metastoreEventFactory_.getFilteredEvents(events);
     NotificationEvent lastProcessedEvent = null;
+    final Timer.Context context =
+        metrics_.getTimer(EVENTS_PROCESS_DURATION_METRIC).time();
     try {
       for (MetastoreEvent event : filteredEvents) {
         // synchronizing each event processing reduces the scope of the lock so the a
@@ -368,6 +445,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
           "Unable to process event %d of type %s. "
               + "Event processing will be stopped.", lastProcessedEvent.getEventId(),
           lastProcessedEvent.getEventType()), e);
+    } finally {
+      context.stop();
     }
   }
 
