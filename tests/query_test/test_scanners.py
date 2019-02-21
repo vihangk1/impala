@@ -379,7 +379,6 @@ class TestParquet(ImpalaTestSuite):
   @SkipIfIsilon.hive
   @SkipIfLocal.hive
   @SkipIfS3.hive
-  @pytest.mark.xfail(reason='CDH-77887: Hive in 6.x fails when creating compressed Parquet files')
   def test_multi_compression_types(self, vector, unique_database):
     """IMPALA-5448: Tests that parquet splits with multi compression types are counted
     correctly. Cases tested:
