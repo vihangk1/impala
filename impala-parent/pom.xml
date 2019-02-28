@@ -48,6 +48,7 @@ under the License.
     <parquet.version>${cdh.apache-parquet.version}</parquet.version>
     <kite.version>${cdh.kite.version}</kite.version>
     <thrift.version>${cdh.thrift.version}</thrift.version>
+    <ranger.version>${env.IMPALA_RANGER_VERSION}</ranger.version>
     <impala.extdatasrc.api.version>1.0-SNAPSHOT</impala.extdatasrc.api.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <kudu.version>${cdh.kudu.version}</kudu.version>
