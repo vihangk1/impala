@@ -237,4 +237,8 @@ See IMPALA-7954 for details -->
   <name>hive.metastore.alter.notifications.basic</name>
   <value>false</value>
 </property>
+<property>
+  <name>hive.metastore.notification.parameters.exclude.patterns</name>
+  <value></value>
+</property>
 </configuration>

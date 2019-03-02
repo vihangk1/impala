@@ -933,7 +933,7 @@ public class MetastoreEventsProcessorTest {
 
     AlterTableEvent alterTableEvent = new AlterTableEvent(
         fakeCatalog, eventsProcessor_.getMetrics(), fakeAlterTableNotification);
-    Assert.assertFalse("Alter table which " + "changes the flags should not be skipped. "
+    Assert.assertFalse("Alter table which changes the flags should not be skipped. "
             + printFlagTransistions(dbFlag, tblFlagTransition),
         alterTableEvent.isEventProcessingDisabled());
 
