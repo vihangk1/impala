@@ -58,12 +58,17 @@ public class NoOpEventProcessor implements ExternalEventsProcessor {
   }
 
   @Override
-  public void stop() {
+  public void pause() {
     // no-op
   }
 
   @Override
   public void start(long fromEventId) {
+    // no-op
+  }
+
+  @Override
+  public void shutdown() {
     // no-op
   }
 

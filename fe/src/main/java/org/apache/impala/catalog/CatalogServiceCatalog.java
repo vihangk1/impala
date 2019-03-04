@@ -1291,7 +1291,7 @@ public class CatalogServiceCatalog extends Catalog {
     // and by the time we processed them, Catalog had already loaded them.
     long currentEventId = metastoreEventProcessor_.getCurrentEventId();
     // stop the event processing since the cache is anyways being cleared
-    metastoreEventProcessor_.stop();
+    metastoreEventProcessor_.pause();
     // Update the HDFS cache pools
     CachePoolReader reader = new CachePoolReader(true);
     reader.run();

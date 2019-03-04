@@ -128,7 +128,7 @@ import org.slf4j.LoggerFactory;
  * update operation is being performed. Since the events are generated post-metastore
  * operations, such catalog updates do not need to update the state in Hive Metastore.
  *
- * Error Handling: The event processor could be in ACTIVE, STOPPED, ERROR states. In case
+ * Error Handling: The event processor could be in ACTIVE, PAUSED, ERROR states. In case
  * of any errors while processing the events the state of event processor changes to ERROR
  * and no subsequent events are polled. In such a case a invalidate metadata command
  * restarts the event polling which updates the lastSyncedEventId to the latest from
@@ -170,11 +170,12 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
 
   // possible status of event processor
   public enum EventProcessorStatus {
-    STOPPED, // event processor is instantiated but not yet scheduled
+    PAUSED, // event processor is paused because is a catalog resetting concurrently
     ACTIVE, // event processor is scheduled at a given frequency
     ERROR, // event processor is in error state and event processing has stopped
-    NEEDS_INVALIDATE // event processor could not resolve certain events and needs a
+    NEEDS_INVALIDATE, // event processor could not resolve certain events and needs a
     // manual invalidate command to reset the state (See AlterEvent for a example)
+    STOPPED // event processor is not configured
   }
 
   // current status of this event processor
@@ -269,14 +270,14 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
 
   /**
    * Stops the event processing and changes the status of event processor to
-   * <code>EventProcessorStatus.STOPPED</code>. No new events will be processed as long
+   * <code>EventProcessorStatus.PAUSED</code>. No new events will be processed as long
    * the status is stopped. If this event processor is actively processing events when
    * stop is called, this method blocks until the current processing is complete
    */
   @Override
-  public synchronized void stop() {
-    Preconditions.checkState(eventProcessorStatus_ != EventProcessorStatus.STOPPED);
-    eventProcessorStatus_ = EventProcessorStatus.STOPPED;
+  public synchronized void pause() {
+    Preconditions.checkState(eventProcessorStatus_ != EventProcessorStatus.PAUSED);
+    eventProcessorStatus_ = EventProcessorStatus.PAUSED;
     LOG.info(String.format("Event processing is stopped. Last synced event id is %d",
         lastSyncedEventId_.get()));
   }
@@ -308,6 +309,12 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     LOG.info(String.format(
         "Metastore event processing restarted. Last synced event id was updated "
             + "from %d to %d", prevLastSyncedEventId, lastSyncedEventId_.get()));
+  }
+
+  @Override
+  public void shutdown() {
+    Preconditions.checkNotNull(scheduler_);
+    scheduler_.shutdownNow();
   }
 
   /**

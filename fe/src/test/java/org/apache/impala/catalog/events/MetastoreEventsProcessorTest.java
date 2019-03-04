@@ -47,7 +47,6 @@ import org.apache.hadoop.hive.metastore.client.builder.DatabaseBuilder;
 import org.apache.hadoop.hive.metastore.client.builder.PartitionBuilder;
 import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
 import org.apache.impala.authorization.AuthorizationConfig;
-import org.apache.impala.authorization.sentry.SentryConfig;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.DatabaseNotFoundException;
@@ -135,6 +134,7 @@ public class MetastoreEventsProcessorTest {
       dropDatabaseCascadeFromHMS();
       // remove database from catalog as well to clean up catalog state
       catalog_.removeDb(TEST_DB_NAME);
+      eventsProcessor_.shutdown();
     } catch (Exception ex) {
       // ignored
     }
@@ -161,7 +161,7 @@ public class MetastoreEventsProcessorTest {
     }
     catalog_.removeDb(TEST_DB_NAME);
     // reset the event processor to the current eventId
-    eventsProcessor_.stop();
+    eventsProcessor_.pause();
     eventsProcessor_.start(eventsProcessor_.getCurrentEventId());
     eventsProcessor_.processEvents();
     assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
@@ -478,17 +478,17 @@ public class MetastoreEventsProcessorTest {
 
   /**
    * Test makes sure that the events are not processed when the event processor is in
-   * STOPPED state
+   * PAUSED state
    * @throws TException
    */
   @Test
-  public void testStopEventProcessing() throws TException {
+  public void testPauseEventProcessing() throws TException {
     try {
       assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
-      eventsProcessor_.stop();
+      eventsProcessor_.pause();
       createDatabase();
       eventsProcessor_.processEvents();
-      assertEquals(EventProcessorStatus.STOPPED, eventsProcessor_.getStatus());
+      assertEquals(EventProcessorStatus.PAUSED, eventsProcessor_.getStatus());
       assertNull(
           "Test database should not be in catalog when event processing is stopped",
           catalog_.getDb(TEST_DB_NAME));
@@ -506,10 +506,10 @@ public class MetastoreEventsProcessorTest {
     try {
       assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
       long syncedIdBefore = eventsProcessor_.getLastSyncedEventId();
-      eventsProcessor_.stop();
+      eventsProcessor_.pause();
       createDatabase();
       eventsProcessor_.processEvents();
-      assertEquals(EventProcessorStatus.STOPPED, eventsProcessor_.getStatus());
+      assertEquals(EventProcessorStatus.PAUSED, eventsProcessor_.getStatus());
       assertNull(
           "Test database should not be in catalog when event processing is stopped",
           catalog_.getDb(TEST_DB_NAME));
@@ -554,20 +554,24 @@ public class MetastoreEventsProcessorTest {
   @Test
   public void testEventProcessorFetchAfterHMSRestart() throws CatalogException {
     MetastoreEventsProcessor fetchProcessor =
-        new HMSFetchNotificationsEventProcessor(
-            catalog_, eventsProcessor_.getCurrentEventId(), 2L);
+        new HMSFetchNotificationsEventProcessor(CatalogServiceTestCatalog.create(),
+            eventsProcessor_.getCurrentEventId(), 2L);
     fetchProcessor.start();
-    assertEquals(EventProcessorStatus.ACTIVE, fetchProcessor.getStatus());
-    // Roughly half of the time an exception is thrown. Make sure the event processor
-    // is still active.
-    while (true) {
-      try {
-        fetchProcessor.getNextMetastoreEvents();
-      } catch (MetastoreNotificationFetchException ex) {
-        break;
+    try {
+      assertEquals(EventProcessorStatus.ACTIVE, fetchProcessor.getStatus());
+      // Roughly half of the time an exception is thrown. Make sure the event processor
+      // is still active.
+      while (true) {
+        try {
+          fetchProcessor.getNextMetastoreEvents();
+        } catch (MetastoreNotificationFetchException ex) {
+          break;
+        }
       }
+      assertEquals(EventProcessorStatus.ACTIVE, fetchProcessor.getStatus());
+    } finally {
+      fetchProcessor.shutdown();
     }
-    assertEquals(EventProcessorStatus.ACTIVE, fetchProcessor.getStatus());
   }
 
   /**
@@ -1028,11 +1032,11 @@ public class MetastoreEventsProcessorTest {
   @Test
   public void testEventProcessorWhenNotActive() throws TException {
     try {
-      eventsProcessor_.stop();
-      assertEquals(EventProcessorStatus.STOPPED, eventsProcessor_.getStatus());
+      eventsProcessor_.pause();
+      assertEquals(EventProcessorStatus.PAUSED, eventsProcessor_.getStatus());
       TEventProcessorMetrics response = eventsProcessor_.getEventProcessorMetrics();
       assertNotNull(response);
-      assertEquals(EventProcessorStatus.STOPPED.toString(), response.getStatus());
+      assertEquals(EventProcessorStatus.PAUSED.toString(), response.getStatus());
       assertFalse(response.isSetEvents_fetch_duration_mean());
       assertFalse(response.isSetEvents_process_duration_mean());
       assertFalse(response.isSetEvents_received());
