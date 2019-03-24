@@ -27,15 +27,11 @@
 # EXPLAIN_LEVEL=2
 # MT_DOP=2
 
-import configparser
+import ConfigParser
 import sys
 from impala_shell_config_defaults import impala_shell_defaults
 from optparse import OptionParser
-try:
-  from collections import OrderedDict
-except ImportError:
-  # Python 2.6 and below does not have OrderedDict.
-  from ordereddict import OrderedDict
+from collections import OrderedDict
 
 
 class ConfigFileFormatError(Exception):
@@ -119,7 +115,7 @@ def get_config_from_file(config_filename, option_list):
   """
   # Customize the ConfigParser to allow duplicate keys. Values from duplicate keys will
   # be appended with new lines.
-  config = configparser.RawConfigParser(dict_type=MultiOrderedDict, strict=False)
+  config = ConfigParser.RawConfigParser(dict_type=MultiOrderedDict)
   try:
     config.read(config_filename)
   except Exception, e:
@@ -136,7 +132,7 @@ def get_config_from_file(config_filename, option_list):
 
   # For query options, we use a standard config parser since we don't want to allow
   # duplicate options.
-  config = configparser.ConfigParser(strict=False)
+  config = ConfigParser.ConfigParser()
   try:
     config.read(config_filename)
   except Exception, e:
