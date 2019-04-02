@@ -458,9 +458,14 @@ under the License.
           <groupId>net.minidev</groupId>
           <artifactId>json-smart</artifactId>
         </exclusion>
+        <!-- TODO (Vihang) this is also bring in hive-exec which we don't want-->
         <exclusion>
           <groupId>org.apache.hive</groupId>
-          <artifactId>hive-exec</artifactId>
+          <artifactId>hive-llap-tez</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-shims</artifactId>
         </exclusion>
       </exclusions>
     </dependency>
@@ -484,22 +489,9 @@ under the License.
           <groupId>org.apache.hive</groupId>
           <artifactId>hive-serde</artifactId>
         </exclusion>
-      </exclusions>
-    </dependency>
-
-    <dependency>
-      <groupId>org.apache.hive.shims</groupId>
-      <artifactId>hive-shims-common</artifactId>
-      <version>${hive.version}</version>
-      <exclusions>
-        <!-- Impala uses log4j v1; avoid pulling in slf4j handling for log4j2 -->
         <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-slf4j-impl</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive.shims</groupId>
-          <artifactId>hive-shims-common</artifactId>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-shims</artifactId>
         </exclusion>
       </exclusions>
     </dependency>
