@@ -63,7 +63,7 @@ done
 # Kill for a clean start.
 ${CLUSTER_BIN}/kill-hive-server.sh &> /dev/null
 
-export HIVE_METASTORE_HADOOP_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=30010"
+export HIVE_METASTORE_HADOOP_OPTS="-verbose:class -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=30010"
 
 # If this is CDP Hive we need to manually add the sentry jars in the classpath since
 # CDH Hive metastore scripts do not do so. This is currently to make sure that we can run
@@ -90,6 +90,21 @@ HADOOP_CLIENT_OPTS="-Xmx2024m -Dhive.log.file=hive-metastore.log" hive \
 ${CLUSTER_BIN}/wait-for-metastore.py --transport=${METASTORE_TRANSPORT}
 
 if [ ${ONLY_METASTORE} -eq 0 ]; then
+  # For Hive 3, we use Tez for execution. We have to add it to the HS2 classpath.
+  if ${USE_CDP_HIVE} ; then
+    export HADOOP_CLASSPATH=${HADOOP_CLASSPATH}:${TEZ_HOME}/*
+    # This is a little hacky, but Tez bundles a bunch of junk into lib/, such
+    # as extra copies of the hadoop libraries, etc, and we want to avoid conflicts.
+    # So, we'll be a bit choosy about what we add to the classpath here.
+    for jar in $TEZ_HOME/lib/* ; do
+      case $(basename $jar) in
+        commons-*|RoaringBitmap*)
+          export HADOOP_CLASSPATH=$HADOOP_CLASSPATH:$jar
+          ;;
+      esac
+    done
+  fi
+
   # Starts a HiveServer2 instance on the port specified by the HIVE_SERVER2_THRIFT_PORT
   # environment variable. HADOOP_HEAPSIZE should be set to at least 2048 to avoid OOM
   # when loading ORC tables like widerow.
