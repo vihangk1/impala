@@ -346,9 +346,12 @@ public class MetadataOp {
     switch (tType) {
       case EXTERNAL_TABLE:
       case MANAGED_TABLE:
+      // INDEX_TABLE has been deprecated and removed in Hive 3.0 (HIVE-18715)
+      // the enum has INDEX_TABLE only for backwards compatibility reasons
       case INDEX_TABLE:
         return TABLE_TYPE_TABLE;
       case VIRTUAL_VIEW:
+      case MATERIALIZED_VIEW:
         return TABLE_TYPE_VIEW;
       default:
         return defaultTableType;

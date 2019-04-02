@@ -18,6 +18,7 @@
 # Base class for test that need to run with both just privilege
 # cache as well as Sentry privilege refresh.
 
+import time
 from tests.common.custom_cluster_test_suite import CustomClusterTestSuite
 
 
@@ -61,13 +62,15 @@ class SentryCacheTestSuite(CustomClusterTestSuite):
     """
     show_user = True if 'show grant user' in query else False
     if refresh_authorization: self.execute_query('refresh authorization')
+
     result = self.execute_query_expect_success(client, query, user=user)
+    print "VIHANG-SHOW-GRANT-PRIV : query : {1} {0}".format(result.data, query)
     return SentryCacheTestSuite.check_privileges(result, test_obj,
                                                  null_create_date=(not
                                                                    refresh_authorization),
                                                  show_user=show_user)
 
-  def user_query(self, client, query, user=None, error_msg=None):
+  def user_query(self, client, query, user=None, error_msg=None, wait_time_s=None):
     """
     Executes a query with the specified user client. If error_msg is set, then expect a
     failure. Returns None when there is no error_msg.
@@ -77,8 +80,11 @@ class SentryCacheTestSuite(CustomClusterTestSuite):
                                             user=user)
       SentryCacheTestSuite.verify_exceptions(error_msg, str(e))
       return None
-    return self.execute_query_expect_success(client, query, query_options={"sync_ddl": 1},
+    result = self.execute_query_expect_success(client, query, query_options={"sync_ddl": 1},
                                              user=user)
+    if wait_time_s is not None:
+      time.sleep(wait_time_s)
+    return result
 
   @staticmethod
   def verify_exceptions(expected_str, actual_str):
