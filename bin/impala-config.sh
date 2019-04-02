@@ -161,7 +161,10 @@ fi
 export CDH_DOWNLOAD_HOST
 export CDH_MAJOR_VERSION=6
 export CDH_BUILD_NUMBER=1009254
-export CDP_BUILD_NUMBER=976603
+# Custom Hive build which has fixes for HIVE-21586 and HIVE-21596
+# TODO (Vihang) remove this and start using the regular Hive 3.1.0 builds once
+# HIVE-21586 and HIVE-21596 is available
+export CDP_BUILD_NUMBER=9999994
 export IMPALA_HADOOP_VERSION=3.0.0-cdh6.x-SNAPSHOT
 export IMPALA_HBASE_VERSION=2.1.0-cdh6.x-SNAPSHOT
 export IMPALA_SENTRY_VERSION=2.1.0-cdh6.x-SNAPSHOT
@@ -171,12 +174,45 @@ export IMPALA_AVRO_JAVA_VERSION=1.8.2-cdh6.x-SNAPSHOT
 export IMPALA_LLAMA_MINIKDC_VERSION=1.0.0
 export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
+# IMPALA_HIVE_VERSION denotes the version of hive build which is used to build impala
+export IMPALA_HIVE_VERSION=${IMPALA_HIVE_VERSION-3.1.0.6.0.99.0-38}
+# CDH hive version is used to spin up minicluster when USE_CDP_HIVE is false
+export CDH_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
+# set the thirdparty download flag to be used to download cdh_components below
+if [ -d "$IMPALA_HOME/thirdparty" ]; then
+  NO_THIRDPARTY=false
+else
+  NO_THIRDPARTY=true
+fi
+# If true, download and use the CDH components from S3 instead of the ones
+# in $IMPALA_HOME/thirdparty.
+export DOWNLOAD_CDH_COMPONENTS=${DOWNLOAD_CDH_COMPONENTS-"$NO_THIRDPARTY"}
+# The directory in which all the thirdparty CDH components live.
+if [ "${DOWNLOAD_CDH_COMPONENTS}" = true ]; then
+  export CDH_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER"
+else
+  export CDH_COMPONENTS_HOME="$IMPALA_HOME/thirdparty"
+fi
+
+export CDP_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdp_components-$CDP_BUILD_NUMBER"
+ESCAPED_IMPALA_HOME=$(sed "s/[^0-9a-zA-Z]/_/g" <<< "$IMPALA_HOME")
+# When USE_CDP_HIVE is set we use the latest hive version available to deply in minicluster
 export USE_CDP_HIVE=${USE_CDP_HIVE-false}
 if $USE_CDP_HIVE; then
-  export IMPALA_HIVE_VERSION=3.1.0.6.0.99.0-9
+  export MINICLUSTER_HIVE_VERSION=${IMPALA_HIVE_VERSION}
+  # TODO(Vihang) we should repackage the tarballs so that the src and binaries are extracted
+  # in the same directory
+  export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${MINICLUSTER_HIVE_VERSION}-bin"
+  # It is likely that devs will want to with both the versions of metastore
+  # if cdp hive is being used change the metastore db name, so we don't have to
+  # format the metastore db everytime we switch between hive versions
+  export METASTORE_DB=${METASTORE_DB-"$(cut -c-59 <<< HMS$ESCAPED_IMPALA_HOME)_cdp"}
 else
-  export IMPALA_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
+  export MINICLUSTER_HIVE_VERSION=${CDH_HIVE_VERSION}
+  export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-${CDH_BUILD_NUMBER}/hive-${MINICLUSTER_HIVE_VERSION}"
+  export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
 fi
+export PATH="$HIVE_HOME/bin:$PATH"
 
 # When IMPALA_(CDH_COMPONENT)_URL are overridden, they may contain '$(platform_label)'
 # which will be substituted for the CDH platform label in bootstrap_toolchain.py
@@ -250,14 +286,6 @@ export IMPALA_MAVEN_OPTIONS=${IMPALA_MAVEN_OPTIONS-}
 # If enabled, debug symbols are added to cross-compiled IR.
 export ENABLE_IMPALA_IR_DEBUG_INFO=${ENABLE_IMPALA_IR_DEBUG_INFO-false}
 
-if [ -d "$IMPALA_HOME/thirdparty" ]; then
-  NO_THIRDPARTY=false
-else
-  NO_THIRDPARTY=true
-fi
-# If true, download and use the CDH components from S3 instead of the ones
-# in $IMPALA_HOME/thirdparty.
-export DOWNLOAD_CDH_COMPONENTS=${DOWNLOAD_CDH_COMPONENTS-"$NO_THIRDPARTY"}
 
 export IS_OSX="$(if [[ "$OSTYPE" == "darwin"* ]]; then echo true; else echo false; fi)"
 
@@ -285,16 +313,6 @@ export EXTERNAL_LISTEN_HOST="${EXTERNAL_LISTEN_HOST-0.0.0.0}"
 export DEFAULT_FS="${DEFAULT_FS-hdfs://${INTERNAL_LISTEN_HOST}:20500}"
 export WAREHOUSE_LOCATION_PREFIX="${WAREHOUSE_LOCATION_PREFIX-}"
 export LOCAL_FS="file:${WAREHOUSE_LOCATION_PREFIX}"
-ESCAPED_IMPALA_HOME=$(sed "s/[^0-9a-zA-Z]/_/g" <<< "$IMPALA_HOME")
-if $USE_CDP_HIVE; then
-  # It is likely that devs will want to with both the versions of metastore
-  # if cdp hive is being used change the metastore db name, so we don't have to
-  # format the metastore db everytime we switch between hive versions
-  export METASTORE_DB=${METASTORE_DB-"$(cut -c-59 <<< HMS$ESCAPED_IMPALA_HOME)_cdp"}
-else
-  export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
-fi
-
 
 export SENTRY_POLICY_DB=${SENTRY_POLICY_DB-$(cut -c-63 <<< SP$ESCAPED_IMPALA_HOME)}
 if [[ "${TARGET_FILESYSTEM}" == "s3" ]]; then
@@ -486,19 +504,6 @@ export IMPALA_COMMON_DIR="$IMPALA_HOME/common"
 export PATH="$IMPALA_TOOLCHAIN/gdb-$IMPALA_GDB_VERSION/bin:$PATH"
 export PATH="$IMPALA_HOME/bin:$IMPALA_TOOLCHAIN/cmake-$IMPALA_CMAKE_VERSION/bin/:$PATH"
 
-# The directory in which all the thirdparty CDH components live.
-if [ "${DOWNLOAD_CDH_COMPONENTS}" = true ]; then
-  export CDH_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER"
-else
-  export CDH_COMPONENTS_HOME="$IMPALA_HOME/thirdparty"
-fi
-
-# The directory in which all the CDP components live. Applies only when
-# USE_CDP_HIVE is set to true
-if $USE_CDP_HIVE; then
-  export CDP_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdp_components-$CDP_BUILD_NUMBER"
-fi
-
 # Typically we build against a snapshot build of Hadoop that includes everything we need
 # for building Impala and running a minicluster.
 export HADOOP_HOME="$CDH_COMPONENTS_HOME/hadoop-${IMPALA_HADOOP_VERSION}/"
@@ -534,16 +539,11 @@ export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 
 
 # Extract the first component of the hive version.
-export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
-if $USE_CDP_HIVE; then
-  export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
-else
-  export HIVE_HOME="$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/"
-fi
-export PATH="$HIVE_HOME/bin:$PATH"
 # Allow overriding of Hive source location in case we want to build Impala without
 # a complete Hive build.
-export HIVE_SRC_DIR=${HIVE_SRC_DIR_OVERRIDE:-"${HIVE_HOME}/src"}
+export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
+# Set the path to the hive_metastore.thrift which is used to build thrift code
+export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin/src/standalone-metastore/src/main/thrift
 # To configure Hive logging, there's a hive-log4j2.properties[.template]
 # file in fe/src/test/resources. To get it into the classpath earlier
 # than the hive-log4j2.properties file included in some Hive jars,
@@ -726,7 +726,6 @@ echo "HADOOP_LIB_DIR          = $HADOOP_LIB_DIR"
 echo "MINI_DFS_BASE_DATA_DIR  = $MINI_DFS_BASE_DATA_DIR"
 echo "HIVE_HOME               = $HIVE_HOME"
 echo "HIVE_CONF_DIR           = $HIVE_CONF_DIR"
-echo "HIVE_SRC_DIR            = $HIVE_SRC_DIR"
 echo "HBASE_HOME              = $HBASE_HOME"
 echo "HBASE_CONF_DIR          = $HBASE_CONF_DIR"
 echo "SENTRY_HOME             = $SENTRY_HOME"
@@ -750,9 +749,7 @@ echo "IMPALA_MAVEN_OPTIONS    = $IMPALA_MAVEN_OPTIONS"
 echo "CDH_DOWNLOAD_HOST       = $CDH_DOWNLOAD_HOST"
 echo "CDH_BUILD_NUMBER        = $CDH_BUILD_NUMBER"
 echo "CDP_BUILD_NUMBER        = $CDP_BUILD_NUMBER"
-if $USE_CDP_HIVE; then
-  echo "CDP_COMPONENTS_HOME     = $CDP_COMPONENTS_HOME"
-fi
+echo "CDP_COMPONENTS_HOME     = $CDP_COMPONENTS_HOME"
 echo "IMPALA_HIVE_VERSION     = $IMPALA_HIVE_VERSION"
 echo "METASTORE_DB            = $METASTORE_DB"
 

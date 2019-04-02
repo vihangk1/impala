@@ -342,9 +342,8 @@ public class MetadataOp {
     switch (tType) {
       case EXTERNAL_TABLE:
       case MANAGED_TABLE:
-      case INDEX_TABLE:
-        return TABLE_TYPE_TABLE;
       case VIRTUAL_VIEW:
+      case MATERIALIZED_VIEW:
         return TABLE_TYPE_VIEW;
       default:
         return defaultTableType;

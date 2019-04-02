@@ -67,6 +67,8 @@ public class UdfExecutor {
   private final static TBinaryProtocol.Factory PROTOCOL_FACTORY =
     new TBinaryProtocol.Factory();
 
+  // this needs hive-exec dependency which is a uber jar and a tons of unnecessary stuff
+  // Unfortunately, there is no easy work-around for this
   private UDF udf_;
   // setup by init() and cleared by close()
   private Method method_;

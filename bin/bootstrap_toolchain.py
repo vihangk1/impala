@@ -432,14 +432,10 @@ def download_ranger(toolchain_root):
 
 
 def download_cdp_hive(toolchain_root):
-  use_cdp_hive = os.getenv("USE_CDP_HIVE") == "true"
-  if not use_cdp_hive:
-    return
-
+  # We always download the latest Hive since we build against Hive-3 libraries
   if "CDP_BUILD_NUMBER" not in os.environ:
     logging.error("Impala environment not set up correctly. CDP_BUILD_NUMBER must "
-                  "be set when USE_CDP_HIVE is set to true. Make sure "
-                  "impala-config.sh is sourced.")
+                  "be set. Make sure impala-config.sh is sourced.")
     sys.exit(1)
 
   cdp_build_number = os.environ.get("CDP_BUILD_NUMBER")
@@ -456,7 +452,13 @@ def download_cdp_hive(toolchain_root):
     os.makedirs(cdp_components_home)
 
   version = os.environ.get("IMPALA_HIVE_VERSION")
+  if not version:
+    logging.error("Impala environment not set up correctly. IMPALA_HIVE_VERSION must"
+                   "be set. Make sure to source impala-config.sh")
+    sys.exit(1)
+
   # TODO the naming convention of the CDP Hive is different than cdh6.x hive
+  # We should repackage the binaries to rename the top level directories consistently
   # The tar balls are named for example like apache-hive-3.1.0.6.0.99.0-9-bin.tar.gz
   dir_name = "apache-hive-{0}-bin".format(version)
   pkg_directory = os.path.join(cdp_components_home, dir_name)
@@ -536,9 +538,13 @@ if __name__ == "__main__":
   cdh_build_number = os.environ.get("CDH_BUILD_NUMBER")
 
   cdh_components = map(Package, ["hadoop", "hbase", "sentry"])
-  use_cdp_hive = os.getenv("USE_CDP_HIVE") == "true"
-  if not use_cdp_hive:
-    cdh_components += [Package("hive")]
+  if not os.getenv("CDH_HIVE_VERSION"):
+     logging.error("Impala environment not set up correctly, make sure "
+                    "impala-config.sh is sourced and CDH_HIVE_VERSION "
+                    "is set.")
+     sys.exit(1)
+
+  cdh_components += [Package("hive", os.getenv("CDH_HIVE_VERSION"))]
 
   if use_cdh_kudu:
     if not try_get_platform_release_label() or not try_get_platform_release_label().cdh:

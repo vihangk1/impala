@@ -19,7 +19,6 @@ package org.apache.impala.catalog.events;
 
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.ALTER_TABLE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.CREATE_DATABASE;
-import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.CREATE_TABLE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.DROP_DATABASE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.DROP_TABLE;
 import static org.junit.Assert.assertEquals;
@@ -41,17 +40,17 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
-import org.apache.hadoop.hive.metastore.api.GetPartitionsRequest;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
-import org.apache.hadoop.hive.metastore.client.builder.DatabaseBuilder;
-import org.apache.hadoop.hive.metastore.client.builder.PartitionBuilder;
 import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
+import org.apache.hadoop.hive.metastore.messaging.MessageBuilder;
+import org.apache.hadoop.hive.metastore.messaging.MessageFactory;
 import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.authorization.NoneAuthorizationFactory;
 import org.apache.impala.catalog.CatalogException;
@@ -96,7 +95,6 @@ import org.apache.impala.thrift.TDropDbParams;
 import org.apache.impala.thrift.TDropTableOrViewParams;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
-import org.apache.impala.thrift.THdfsCachingOp;
 import org.apache.impala.thrift.THdfsFileFormat;
 import org.apache.impala.thrift.TOwnerType;
 import org.apache.impala.thrift.TPartitionDef;
@@ -139,9 +137,11 @@ public class MetastoreEventsProcessorTest {
   private static MetastoreEventsProcessor eventsProcessor_;
   private static final Logger LOG =
       LoggerFactory.getLogger(MetastoreEventsProcessorTest.class);
+  private static HiveConf hiveConf_;
 
   @BeforeClass
   public static void setUpTestEnvironment() throws TException {
+    hiveConf_ = new HiveConf();
     catalog_ = CatalogServiceTestCatalog.create();
     catalogOpExecutor_ = new CatalogOpExecutor(catalog_, new NoneAuthorizationFactory());
     try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
@@ -1049,8 +1049,9 @@ public class MetastoreEventsProcessorTest {
     fakeEvent.setTableName(tblName);
     fakeEvent.setDbName(dbName);
     fakeEvent.setEventId(eventIdGenerator.incrementAndGet());
-    fakeEvent.setMessage(MetastoreEventsProcessor.getMessageFactory()
-        .buildAlterTableMessage(tableBefore, tableAfter).toString());
+    //TODO (Vihang) this may not compiled against hive 2
+    fakeEvent.setMessage(MessageBuilder.getInstance()
+        .buildAlterTableMessage(tableBefore, tableAfter, false, -1L).toString());
     fakeEvent.setEventType("ALTER_TABLE");
     return fakeEvent;
   }
@@ -1666,17 +1667,16 @@ public class MetastoreEventsProcessorTest {
 
   private void createDatabase(String dbName, Map<String, String> params)
       throws TException {
-    DatabaseBuilder databaseBuilder =
-        new DatabaseBuilder()
-            .setName(dbName)
-            .setDescription("Notification test database")
-            .setOwnerName("NotificationTestOwner")
-            .setOwnerType(PrincipalType.USER);
+    Database database = new Database();
+    database.setName(dbName);
+    database.setDescription("Notification test database");
+    database.setOwnerName("NotificationOwner");
+    database.setOwnerType(PrincipalType.USER);
     if (params != null && !params.isEmpty()) {
-      databaseBuilder.setParams(params);
+      database.setParameters(params);
     }
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-      msClient.getHiveClient().createDatabase(databaseBuilder.build());
+      msClient.getHiveClient().createDatabase(database);
     }
   }
 
@@ -1727,7 +1727,7 @@ public class MetastoreEventsProcessorTest {
     if (isPartitioned) {
       tblBuilder.addPartCol("p1", "string", "partition p1 description");
     }
-    return tblBuilder.build();
+    return tblBuilder.build(hiveConf_);
   }
 
   /**
@@ -2181,8 +2181,6 @@ public class MetastoreEventsProcessorTest {
   private void alterPartitions(String tblName, List<List<String>> partValsList,
       Map<String, String> newParams)
       throws TException {
-    GetPartitionsRequest request = new GetPartitionsRequest();
-    request.setDbName(TEST_DB_NAME);
     List<Partition> partitions = new ArrayList<>();
     try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
       for (List<String> partVal : partValsList) {
@@ -2206,14 +2204,12 @@ public class MetastoreEventsProcessorTest {
       org.apache.hadoop.hive.metastore.api.Table msTable =
           msClient.getHiveClient().getTable(dbName, tblName);
       for (List<String> partVals : partitionValues) {
-        partitions.add(
-            new PartitionBuilder()
-                .fromTable(msTable)
-                .setInputFormat(msTable.getSd().getInputFormat())
-                .setSerdeLib(msTable.getSd().getSerdeInfo().getSerializationLib())
-                .setOutputFormat(msTable.getSd().getOutputFormat())
-                .setValues(partVals)
-                .build());
+        Partition partition = new Partition();
+        partition.setDbName(msTable.getDbName());
+        partition.setTableName(msTable.getTableName());
+        partition.setSd(msTable.getSd().deepCopy());
+        partition.setValues(partVals);
+        partitions.add(partition);
       }
     }
     try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {

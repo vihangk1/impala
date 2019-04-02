@@ -21,7 +21,6 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.math.BigDecimal;
 
-import org.apache.hadoop.hive.ql.parse.BaseSemanticAnalyzer;
 import org.apache.impala.catalog.ScalarType;
 import org.apache.impala.catalog.Type;
 import org.apache.impala.common.AnalysisException;
@@ -90,8 +89,116 @@ public class StringLiteral extends LiteralExpr {
   public String getUnescapedValue() {
     // Unescape string exactly like Hive does. Hive's method assumes
     // quotes so we add them here to reuse Hive's code.
-    return BaseSemanticAnalyzer.unescapeSQLString("'" + getNormalizedValue()
+    return unescapeSQLString("'" + getNormalizedValue()
         + "'");
+  }
+
+  /**
+   * Copied from Apache Hive's BaseSemanticAnalyzer. This method has not changed
+   * since last several years so hoping that it is fairly stable by now. Sourcing it from
+   * the Hive's code without copying brings along with it a lot of other unnecessary
+   * dependencies
+   * @param b
+   * @return
+   */
+  @SuppressWarnings("nls")
+  public static String unescapeSQLString(String b) {
+    Character enclosure = null;
+
+    // Some of the strings can be passed in as unicode. For example, the
+    // delimiter can be passed in as \002 - So, we first check if the
+    // string is a unicode number, else go back to the old behavior
+    StringBuilder sb = new StringBuilder(b.length());
+    for (int i = 0; i < b.length(); i++) {
+
+      char currentChar = b.charAt(i);
+      if (enclosure == null) {
+        if (currentChar == '\'' || b.charAt(i) == '\"') {
+          enclosure = currentChar;
+        }
+        // ignore all other chars outside the enclosure
+        continue;
+      }
+
+      if (enclosure.equals(currentChar)) {
+        enclosure = null;
+        continue;
+      }
+
+      if (currentChar == '\\' && (i + 6 < b.length()) && b.charAt(i + 1) == 'u') {
+        int code = 0;
+        int base = i + 2;
+        for (int j = 0; j < 4; j++) {
+          int digit = Character.digit(b.charAt(j + base), 16);
+          code = (code << 4) + digit;
+        }
+        sb.append((char)code);
+        i += 5;
+        continue;
+      }
+
+      if (currentChar == '\\' && (i + 4 < b.length())) {
+        char i1 = b.charAt(i + 1);
+        char i2 = b.charAt(i + 2);
+        char i3 = b.charAt(i + 3);
+        if ((i1 >= '0' && i1 <= '1') && (i2 >= '0' && i2 <= '7')
+            && (i3 >= '0' && i3 <= '7')) {
+          byte bVal = (byte) ((i3 - '0') + ((i2 - '0') * 8) + ((i1 - '0') * 8 * 8));
+          byte[] bValArr = new byte[1];
+          bValArr[0] = bVal;
+          String tmp = new String(bValArr);
+          sb.append(tmp);
+          i += 3;
+          continue;
+        }
+      }
+
+      if (currentChar == '\\' && (i + 2 < b.length())) {
+        char n = b.charAt(i + 1);
+        switch (n) {
+          case '0':
+            sb.append("\0");
+            break;
+          case '\'':
+            sb.append("'");
+            break;
+          case '"':
+            sb.append("\"");
+            break;
+          case 'b':
+            sb.append("\b");
+            break;
+          case 'n':
+            sb.append("\n");
+            break;
+          case 'r':
+            sb.append("\r");
+            break;
+          case 't':
+            sb.append("\t");
+            break;
+          case 'Z':
+            sb.append("\u001A");
+            break;
+          case '\\':
+            sb.append("\\");
+            break;
+          // The following 2 lines are exactly what MySQL does TODO: why do we do this?
+          case '%':
+            sb.append("\\%");
+            break;
+          case '_':
+            sb.append("\\_");
+            break;
+          default:
+            sb.append(n);
+        }
+        i++;
+      } else {
+        sb.append(currentChar);
+      }
+    }
+    return sb.toString();
   }
 
   /**
