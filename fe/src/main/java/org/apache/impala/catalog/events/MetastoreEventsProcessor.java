@@ -28,11 +28,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.NotificationEventResponse;
+import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
+import org.apache.hadoop.hive.metastore.messaging.MessageDeserializer;
 import org.apache.hadoop.hive.metastore.messaging.MessageFactory;
-import org.apache.hadoop.hive.metastore.messaging.json.ExtendedJSONMessageFactory;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
@@ -166,13 +168,9 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
 
   private static final Logger LOG =
       LoggerFactory.getLogger(MetastoreEventsProcessor.class);
-  // Use ExtendedJSONMessageFactory to deserialize the event messages.
-  // ExtendedJSONMessageFactory adds additional information over JSONMessageFactory so
-  // that events are compatible with Sentry
-  // TODO this should be moved to JSONMessageFactory when Sentry switches to
-  // JSONMessageFactory
-  private static final MessageFactory messageFactory =
-      ExtendedJSONMessageFactory.getInstance();
+
+  private static final MessageDeserializer messageFactory =
+      MessageFactory.getDefaultInstance(new HiveConf()).getDeserializer();
 
   private static MetastoreEventsProcessor instance;
 
@@ -604,7 +602,7 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     return metastoreEventFactory_;
   }
 
-  public static MessageFactory getMessageFactory() {
+  public static MessageDeserializer getMessageDeserializer() {
     return messageFactory;
   }
 }

@@ -17,6 +17,11 @@
 
 package org.apache.impala.catalog;
 
+import com.google.common.base.CharMatcher;
+import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Ordering;
+import java.util.List;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -60,6 +65,12 @@ public class MetaStoreClientPool {
   private Boolean poolClosed_ = false;
   private final Object poolCloseLock_ = new Object();
   private final HiveConf hiveConf_;
+  private List<Integer> serverVersion = null;
+
+  private static final Ordering<Iterable<Integer>> VERSION_ORDERING =
+      Ordering.<Integer>natural().lexicographical().nullsLast();
+  private static final ImmutableList<Integer> CATALOGS_VERSION =
+      ImmutableList.of(3, 0, 0);
 
   // Required for creating an instance of RetryingMetaStoreClient.
   private static final HiveMetaHookLoader dummyHookLoader = new HiveMetaHookLoader() {
@@ -89,29 +100,8 @@ public class MetaStoreClientPool {
         LOG.trace("Creating MetaStoreClient. Pool Size = " + clientPool_.size());
       }
 
-      long retryDelaySeconds = hiveConf.getTimeVar(
-          HiveConf.ConfVars.METASTORE_CLIENT_CONNECT_RETRY_DELAY, TimeUnit.SECONDS);
-      long retryDelayMillis = retryDelaySeconds * 1000;
-      long endTimeMillis = System.currentTimeMillis() + cnxnTimeoutSec * 1000;
-      IMetaStoreClient hiveClient = null;
-      while (true) {
-        try {
-          hiveClient = RetryingMetaStoreClient.getProxy(hiveConf, dummyHookLoader,
-              HiveMetaStoreClient.class.getName());
-          break;
-        } catch (Exception e) {
-          // If time is up, throw an unchecked exception
-          long delayUntilMillis = System.currentTimeMillis() + retryDelayMillis;
-          if (delayUntilMillis >= endTimeMillis) throw new IllegalStateException(e);
-
-          LOG.warn("Failed to connect to Hive MetaStore. Retrying.", e);
-          while (delayUntilMillis > System.currentTimeMillis()) {
-            try {
-              Thread.sleep(delayUntilMillis - System.currentTimeMillis());
-            } catch (InterruptedException | IllegalArgumentException ignore) {}
-          }
-        }
-      }
+      //TODO (Vihang) - use MetastoreConf when updated to hive 3 deps
+      IMetaStoreClient hiveClient = instantiateClientWithRetry(hiveConf, cnxnTimeoutSec);
       hiveClient_ = hiveClient;
       isInUse_ = false;
     }
@@ -151,6 +141,38 @@ public class MetaStoreClientPool {
     }
   }
 
+
+  private IMetaStoreClient instantiateClientWithRetry(HiveConf hiveConf,
+      int cnxnTimeoutSec) {
+    long retryDelaySeconds = hiveConf
+        .getTimeVar(HiveConf.ConfVars.METASTORE_CLIENT_CONNECT_RETRY_DELAY,
+            TimeUnit.SECONDS);
+    long retryDelayMillis = retryDelaySeconds * 1000;
+    long endTimeMillis = System.currentTimeMillis() + cnxnTimeoutSec * 1000;
+    IMetaStoreClient hiveClient = null;
+    while (true) {
+      try {
+        //TODO (Vihang) - This method is changed to using Configuration instead of
+        // HiveConf
+        hiveClient = RetryingMetaStoreClient
+            .getProxy(hiveConf, dummyHookLoader, HiveMetaStoreClient.class.getName());
+        break;
+      } catch (Exception e) {
+        // If time is up, throw an unchecked exception
+        long delayUntilMillis = System.currentTimeMillis() + retryDelayMillis;
+        if (delayUntilMillis >= endTimeMillis) throw new IllegalStateException(e);
+
+        LOG.warn("Failed to connect to Hive MetaStore. Retrying.", e);
+        while (delayUntilMillis > System.currentTimeMillis()) {
+          try {
+            Thread.sleep(delayUntilMillis - System.currentTimeMillis());
+          } catch (InterruptedException | IllegalArgumentException ignore) {}
+        }
+      }
+    }
+    return hiveClient;
+  }
+
   public MetaStoreClientPool(int initialSize, int initialCnxnTimeoutSec) {
     this(initialSize, initialCnxnTimeoutSec, new HiveConf(MetaStoreClientPool.class));
   }
@@ -160,7 +182,20 @@ public class MetaStoreClientPool {
     hiveConf_ = hiveConf;
     clientCreationDelayMs_ = hiveConf_.getInt(HIVE_METASTORE_CNXN_DELAY_MS_CONF,
         DEFAULT_HIVE_METASTORE_CNXN_DELAY_MS_CONF);
+    initServerVersion(initialCnxnTimeoutSec);
     initClients(initialSize, initialCnxnTimeoutSec);
+  }
+
+  private synchronized void initServerVersion(int initialCnxnTimeoutSec) {
+    IMetaStoreClient client = null;
+    try {
+      client = instantiateClientWithRetry(hiveConf_,
+          initialCnxnTimeoutSec);
+      //serverVersion = client.getHiveClient().getServerVersion();
+      serverVersion = parseVersion("2.1.0-SNAPSHOT");
+    } finally {
+      if (client != null) client.close();
+    }
   }
 
   /**
@@ -173,7 +208,8 @@ public class MetaStoreClientPool {
     if (numClients > 0) {
       clientPool_.add(new MetaStoreClient(hiveConf_, initialCnxnTimeoutSec));
       for (int i = 0; i < numClients - 1; ++i) {
-        clientPool_.add(new MetaStoreClient(hiveConf_, 0));
+        MetaStoreClient client = new MetaStoreClient(hiveConf_, 0);
+        clientPool_.add(client);
       }
     }
   }
@@ -224,5 +260,20 @@ public class MetaStoreClientPool {
     while ((client = clientPool_.poll()) != null) {
       client.getHiveClient().close();
     }
+  }
+
+  public static List<Integer> parseVersion(String version) {
+    ImmutableList.Builder<Integer> b = new ImmutableList.Builder<>();
+    for (String s : Splitter.on(CharMatcher.anyOf(".-")).split(version)) {
+      try {
+        b.add(Integer.parseInt(s));
+      } catch (NumberFormatException nfe) {
+        // Break when we hit a string like 'dev'
+        break;
+      }
+    }
+    List<Integer> ret = b.build();
+    Preconditions.checkArgument(!ret.isEmpty(), "Invalid version string: %s", version);
+    return ret;
   }
 }

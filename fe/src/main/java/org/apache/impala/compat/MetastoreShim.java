@@ -22,11 +22,12 @@ import java.util.List;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.MetaStoreUtils;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Partition;
+import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
 import org.apache.hive.service.rpc.thrift.TGetColumnsReq;
 import org.apache.hive.service.rpc.thrift.TGetFunctionsReq;
 import org.apache.hive.service.rpc.thrift.TGetSchemasReq;
@@ -76,9 +77,10 @@ public class MetastoreShim {
    * Wrapper around MetaStoreUtils.updatePartitionStatsFast() to deal with added
    * arguments.
    */
-  public static void updatePartitionStatsFast(Partition partition, Warehouse warehouse)
-      throws MetaException {
-    MetaStoreUtils.updatePartitionStatsFast(partition, warehouse, null);
+  public static void updatePartitionStatsFast(Partition partition, Table tbl,
+      Warehouse warehouse) throws MetaException {
+    MetaStoreUtils
+        .updatePartitionStatsFast(partition, tbl, warehouse, false, false, null, false);
   }
 
   /**

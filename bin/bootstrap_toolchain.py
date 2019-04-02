@@ -542,9 +542,13 @@ if __name__ == "__main__":
   cdh_build_number = os.environ["CDH_BUILD_NUMBER"]
 
   cdh_components = map(Package, ["hadoop", "hbase", "sentry"])
-  use_cdp_hive = os.getenv("USE_CDP_HIVE") == "true"
-  if not use_cdp_hive:
-    cdh_components += [Package("hive")]
+  if not os.getenv("CDH_HIVE_VERSION"):
+     logging.error("Impala environment not set up correctly, make sure "
+                    "impala-config.sh is sourced and CDH_HIVE_VERSION "
+                    "is set.")
+     sys.exit(1)
+
+  cdh_components += [Package("hive", os.getenv("CDH_HIVE_VERSION"))]
 
   if use_cdh_kudu:
     if not try_get_platform_release_label() or not try_get_platform_release_label().cdh:
@@ -565,10 +569,13 @@ if __name__ == "__main__":
   download_cdh_components(toolchain_root, cdh_components, download_path_prefix)
 
   cdp_build_number = os.environ["CDP_BUILD_NUMBER"]
+  # We always download the CDP hive source since it has the hive_metastore.thrift which
+  # is needed for build
   cdp_components = [
     CdpComponent("ranger-{0}-admin".format(os.environ.get("IMPALA_RANGER_VERSION"))),
     CdpComponent("apache-hive-{0}-src".format(os.environ.get("IMPALA_HIVE_VERSION"))),
   ]
+  use_cdp_hive = os.getenv("USE_CDP_HIVE") == "true"
   if use_cdp_hive:
     cdp_components.append(CdpComponent("apache-hive-{0}-bin"
                           .format(os.environ.get("IMPALA_HIVE_VERSION"))))

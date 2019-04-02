@@ -187,7 +187,7 @@ public class MetastoreEvents {
         metastoreEvents.add(get(event));
       }
       Iterator<MetastoreEvent> it = metastoreEvents.iterator();
-      // filter out the create events which has a corresponding drop event later
+      // filter out the create events which has a corresponding drop event later`
       int sizeBefore = metastoreEvents.size();
       int numFilteredEvents = 0;
       int i = 0;
@@ -490,7 +490,7 @@ public class MetastoreEvents {
       Preconditions
           .checkNotNull(event.getMessage(), debugString("Event message is null"));
       CreateTableMessage createTableMessage =
-          MetastoreEventsProcessor.getMessageFactory().getDeserializer()
+          MetastoreEventsProcessor.getMessageDeserializer()
               .getCreateTableMessage(event.getMessage());
       try {
         msTbl_ = createTableMessage.getTableObj();
@@ -591,8 +591,8 @@ public class MetastoreEvents {
       super(catalog, metrics, event);
       Preconditions.checkArgument(MetastoreEventType.ALTER_TABLE.equals(eventType_));
       JSONAlterTableMessage alterTableMessage =
-          (JSONAlterTableMessage) MetastoreEventsProcessor.getMessageFactory()
-              .getDeserializer().getAlterTableMessage(event.getMessage());
+          (JSONAlterTableMessage) MetastoreEventsProcessor.getMessageDeserializer()
+              .getAlterTableMessage(event.getMessage());
       try {
         msTbl_ = Preconditions.checkNotNull(alterTableMessage.getTableObjBefore());
         tableAfter_ = Preconditions.checkNotNull(alterTableMessage.getTableObjAfter());
@@ -760,8 +760,8 @@ public class MetastoreEvents {
       super(catalog, metrics, event);
       Preconditions.checkArgument(MetastoreEventType.DROP_TABLE.equals(eventType_));
       JSONDropTableMessage dropTableMessage =
-          (JSONDropTableMessage) MetastoreEventsProcessor.getMessageFactory()
-              .getDeserializer().getDropTableMessage(event.getMessage());
+          (JSONDropTableMessage) MetastoreEventsProcessor.getMessageDeserializer()
+              .getDropTableMessage(event.getMessage());
       try {
         msTbl_ = Preconditions.checkNotNull(dropTableMessage.getTableObj());
       } catch (Exception e) {
@@ -822,8 +822,8 @@ public class MetastoreEvents {
       super(catalog, metrics, event);
       Preconditions.checkArgument(MetastoreEventType.CREATE_DATABASE.equals(eventType_));
       JSONCreateDatabaseMessage createDatabaseMessage =
-          (JSONCreateDatabaseMessage) MetastoreEventsProcessor.getMessageFactory()
-              .getDeserializer().getCreateDatabaseMessage(event.getMessage());
+          (JSONCreateDatabaseMessage) MetastoreEventsProcessor.getMessageDeserializer()
+              .getCreateDatabaseMessage(event.getMessage());
       try {
         createdDatabase_ =
             Preconditions.checkNotNull(createDatabaseMessage.getDatabaseObject());
@@ -888,8 +888,8 @@ public class MetastoreEvents {
       super(catalog, metrics, event);
       Preconditions.checkArgument(MetastoreEventType.DROP_DATABASE.equals(eventType_));
       JSONDropDatabaseMessage dropDatabaseMessage =
-          (JSONDropDatabaseMessage) MetastoreEventsProcessor.getMessageFactory()
-              .getDeserializer().getDropDatabaseMessage(event.getMessage());
+          (JSONDropDatabaseMessage) MetastoreEventsProcessor.getMessageDeserializer()
+              .getDropDatabaseMessage(event.getMessage());
       try {
         droppedDatabase_ =
             Preconditions.checkNotNull(dropDatabaseMessage.getDatabaseObject());
@@ -1069,8 +1069,8 @@ public class MetastoreEvents {
       }
       try {
         AddPartitionMessage addPartitionMessage_ =
-            MetastoreEventsProcessor.getMessageFactory()
-                .getDeserializer()
+            MetastoreEventsProcessor.getMessageDeserializer()
+                
                 .getAddPartitionMessage(event.getMessage());
         List<Map<String, String>> keyValues = addPartitionMessage_.getPartitions();
         Preconditions.checkState(keyValues.size() > 0);
@@ -1121,7 +1121,7 @@ public class MetastoreEvents {
       Preconditions.checkState(eventType_.equals(MetastoreEventType.ALTER_PARTITION));
       Preconditions.checkNotNull(event.getMessage());
       AlterPartitionMessage alterPartitionMessage =
-          MetastoreEventsProcessor.getMessageFactory().getDeserializer()
+          MetastoreEventsProcessor.getMessageDeserializer()
               .getAlterPartitionMessage(event.getMessage());
 
       try {
@@ -1165,8 +1165,8 @@ public class MetastoreEvents {
       Preconditions.checkState(eventType_.equals(MetastoreEventType.DROP_PARTITION));
       Preconditions.checkNotNull(event.getMessage());
       DropPartitionMessage dropPartitionMessage =
-          MetastoreEventsProcessor.getMessageFactory()
-              .getDeserializer()
+          MetastoreEventsProcessor.getMessageDeserializer()
+              
               .getDropPartitionMessage(event.getMessage());
       try {
         msTbl_ = dropPartitionMessage.getTableObj();

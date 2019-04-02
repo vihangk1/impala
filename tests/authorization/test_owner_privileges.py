@@ -19,6 +19,7 @@
 
 import grp
 import pytest
+import time
 from getpass import getuser
 from os import getenv
 
@@ -79,6 +80,7 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
       if "owner_priv_test" in role_name:
         self.execute_query("drop role %s" % role_name)
 
+
   @staticmethod
   def count_user_privileges(result):
     """
@@ -95,8 +97,11 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     return total
 
   def _validate_no_user_privileges(self, client, user, refresh_authorization):
-    if refresh_authorization: self.execute_query("refresh authorization")
-    result = self.user_query(client, "show grant user %s" % user, user=user)
+    if refresh_authorization:
+      self.execute_query("refresh authorization")
+
+    result = self.user_query(client, "show grant user %s" % user, user=user, wait_time_s=2)
+    print "VIHANG-RESULT {0}".format(result.data)
     return TestOwnerPrivileges.count_user_privileges(result) == 0
 
   def _setup_admin(self):
@@ -163,7 +168,7 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     self.oo_user2_impalad_client = self.create_impala_client()
     self.user_query(self.oo_user1_impalad_client, "create %s if not exists %s %s %s" %
                     (test_obj.obj_type, test_obj.obj_name, test_obj.table_def,
-                     test_obj.view_select), user="oo_user1")
+                     test_obj.view_select), user="oo_user1", wait_time_s=2)
     self.validate_privileges(self.oo_user1_impalad_client, "show grant user oo_user1",
                              test_obj, user="oo_user1",
                              refresh_authorization=refresh_authorization)
@@ -171,21 +176,21 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     # Ensure grant works.
     self.user_query(self.oo_user1_impalad_client,
                     "grant all on %s %s to role owner_priv_test_all_role" %
-                    (test_obj.grant_name, test_obj.obj_name), user="oo_user1")
+                    (test_obj.grant_name, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     self.user_query(self.oo_user1_impalad_client,
                     "revoke all on %s %s from role owner_priv_test_all_role" %
-                    (test_obj.grant_name, test_obj.obj_name), user="oo_user1")
+                    (test_obj.grant_name, test_obj.obj_name), user="oo_user1", wait_time_s=2)
 
     # Change the database owner and ensure oo_user1 does not have owner privileges.
     self.user_query(self.oo_user1_impalad_client, "alter %s %s set owner user oo_user2" %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     assert self._validate_no_user_privileges(self.oo_user1_impalad_client,
                                              user="oo_user1",
                                              refresh_authorization=refresh_authorization)
 
     # Ensure oo_user1 cannot drop database after owner change.
     self.user_query(self.oo_user1_impalad_client, "drop %s %s" %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1",
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2,
                     error_msg="does not have privileges to execute 'DROP'")
 
     # oo_user2 should have privileges for object now.
@@ -199,12 +204,13 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     self.execute_query("alter %s %s set owner user oo_user1" %
                        (test_obj.obj_type, test_obj.obj_name),
                        query_options={"sync_ddl": 1})
+    time.sleep(2)
     assert self._validate_no_user_privileges(self.oo_user2_impalad_client,
                                              user="oo_user2",
                                              refresh_authorization=refresh_authorization)
     self.user_query(self.oo_user1_impalad_client,
                     "alter %s %s set owner role owner_priv_test_owner_role" %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     # Ensure oo_user1 does not have user privileges.
     assert self._validate_no_user_privileges(self.oo_user1_impalad_client,
                                              user="oo_user1",
@@ -217,7 +223,7 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
 
     # Drop the object and ensure no role privileges.
     self.user_query(self.oo_user1_impalad_client, "drop %s %s " %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     assert self._validate_no_user_privileges(self.oo_user1_impalad_client,
                                              user="oo_user1",
                                              refresh_authorization=refresh_authorization)
@@ -225,9 +231,9 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     # Ensure user privileges are gone after drop.
     self.user_query(self.oo_user1_impalad_client, "create %s if not exists %s %s %s" %
                     (test_obj.obj_type, test_obj.obj_name, test_obj.table_def,
-                     test_obj.view_select), user="oo_user1")
+                     test_obj.view_select), user="oo_user1", wait_time_s=2)
     self.user_query(self.oo_user1_impalad_client, "drop %s %s " %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     assert self._validate_no_user_privileges(self.oo_user1_impalad_client,
                                              user="oo_user1",
                                              refresh_authorization=refresh_authorization)
@@ -267,29 +273,29 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     self.oo_user1_impalad_client = self.create_impala_client()
     self.user_query(self.oo_user1_impalad_client, "create %s if not exists %s %s %s"
                     % (test_obj.obj_type, test_obj.obj_name, test_obj.table_def,
-                       test_obj.view_select), user="oo_user1")
+                       test_obj.view_select), user="oo_user1", wait_time_s=2)
 
     # Ensure grant doesn't work.
     self.user_query(self.oo_user1_impalad_client,
                     "grant all on %s %s to role owner_priv_test_all_role" %
                     (test_obj.grant_name, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges to execute: GRANT_PRIVILEGE")
+                    error_msg="does not have privileges to execute: GRANT_PRIVILEGE", wait_time_s=2)
 
     self.user_query(self.oo_user1_impalad_client,
                     "revoke all on %s %s from role owner_priv_test_all_role" %
                     (test_obj.grant_name, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges to execute: REVOKE_PRIVILEGE")
+                    error_msg="does not have privileges to execute: REVOKE_PRIVILEGE", wait_time_s=2)
 
     # Ensure changing the database owner doesn't work.
     self.user_query(self.oo_user1_impalad_client,
                     "alter %s %s set owner user oo_user2" %
                     (test_obj.obj_type, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges with 'GRANT OPTION'")
+                    error_msg="does not have privileges with 'GRANT OPTION'", wait_time_s=2)
 
     # Ensure oo_user1 cannot drop database.
     self.user_query(self.oo_user1_impalad_client, "drop %s %s" %
                     (test_obj.obj_type, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges to execute 'DROP'")
+                    error_msg="does not have privileges to execute 'DROP'", wait_time_s=2)
 
   @pytest.mark.execute_serially
   @SentryCacheTestSuite.with_args(
@@ -337,7 +343,7 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     self.oo_user1_impalad_client = self.create_impala_client()
     self.user_query(self.oo_user1_impalad_client, "create %s if not exists %s %s %s" %
                     (test_obj.obj_type, test_obj.obj_name, test_obj.table_def,
-                     test_obj.view_select), user="oo_user1")
+                     test_obj.view_select), user="oo_user1", wait_time_s=2)
     self.validate_privileges(self.oo_user1_impalad_client, "show grant user oo_user1",
                              test_obj, user="oo_user1",
                              refresh_authorization=refresh_authorization)
@@ -346,20 +352,20 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
     self.user_query(self.oo_user1_impalad_client,
                     "grant all on %s %s to role owner_priv_test_all_role" %
                     (test_obj.grant_name, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges to execute: GRANT_PRIVILEGE")
+                    error_msg="does not have privileges to execute: GRANT_PRIVILEGE", wait_time_s=2)
 
     self.user_query(self.oo_user1_impalad_client,
                     "revoke all on %s %s from role owner_priv_test_all_role" %
                     (test_obj.grant_name, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges to execute: REVOKE_PRIVILEGE")
+                    error_msg="does not have privileges to execute: REVOKE_PRIVILEGE", wait_time_s=2)
 
     self.user_query(self.oo_user1_impalad_client, "alter %s %s set owner user oo_user2" %
                     (test_obj.obj_type, test_obj.obj_name), user="oo_user1",
-                    error_msg="does not have privileges with 'GRANT OPTION'")
+                    error_msg="does not have privileges with 'GRANT OPTION'", wait_time_s=2)
 
     # Use a delay to avoid cache consistency issue that could occur after alter.
     self.user_query(self.oo_user1_impalad_client, "drop %s %s " %
-                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user1", wait_time_s=2)
     assert self._validate_no_user_privileges(self.oo_user1_impalad_client,
                                              user="oo_user1",
                                              refresh_authorization=refresh_authorization)
@@ -390,35 +396,35 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
       self.execute_query("grant all on server to role %s" % role_name)
 
       self.user_query(foobar_impalad_client, "create database %s_db" %
-                      unique_database, user="foobar")
+                      unique_database, user="foobar", wait_time_s=2)
       # FOOBAR user should not be allowed to create a table in the foobar's database.
       self.user_query(FOOBAR_impalad_client, "create table %s_db.test_tbl(i int)" %
                       unique_database, user="FOOBAR",
                       error_msg="User 'FOOBAR' does not have privileges to execute "
-                                "'CREATE' on: %s_db" % unique_database)
+                                "'CREATE' on: %s_db" % unique_database, wait_time_s=2)
 
-      self.user_query(foobar_impalad_client, "create table %s.owner_case_tbl(i int)" %
-                      unique_database, user="foobar")
+      self.user_query(foobar_impalad_client, "create table %s_db.owner_case_tbl(i int)" %
+                      unique_database, user="foobar", wait_time_s=2)
       # FOOBAR user should not be allowed to select foobar's table.
-      self.user_query(FOOBAR_impalad_client, "select * from %s.owner_case_tbl" %
+      self.user_query(FOOBAR_impalad_client, "select * from %s_db.owner_case_tbl" %
                       unique_database, user="FOOBAR",
                       error_msg="User 'FOOBAR' does not have privileges to execute "
-                                "'SELECT' on: %s.owner_case_tbl" % unique_database)
+                                "'SELECT' on: %s_db.owner_case_tbl" % unique_database, wait_time_s=2)
 
       self.user_query(foobar_impalad_client,
-                      "create view %s.owner_case_view as select 1" % unique_database,
-                      user="foobar")
+                      "create view %s_db.owner_case_view as select 1" % unique_database,
+                      user="foobar", wait_time_s=2)
       # FOOBAR user should not be allowed to select foobar's view.
-      self.user_query(FOOBAR_impalad_client, "select * from %s.owner_case_view" %
+      self.user_query(FOOBAR_impalad_client, "select * from %s_db.owner_case_view" %
                       unique_database, user="FOOBAR",
                       error_msg="User 'FOOBAR' does not have privileges to execute "
-                                "'SELECT' on: %s.owner_case_view" % unique_database)
+                                "'SELECT' on: %s_db.owner_case_view" % unique_database, wait_time_s=2)
 
       # FOOBAR user should not be allowed to see foobar's privileges.
       self.user_query(FOOBAR_impalad_client, "show grant user foobar", user="FOOBAR",
                       error_msg="User 'FOOBAR' does not have privileges to access the "
-                                "requested policy metadata")
+                                "requested policy metadata", wait_time_s=2)
     finally:
-      self.user_query(foobar_impalad_client, "drop database %s_db cascade" %
-                      unique_database, user="foobar")
+      self.user_query(foobar_impalad_client, "drop database if exists %s_db cascade" %
+                      unique_database, user="foobar", wait_time_s=2)
       self.execute_query("drop role %s" % role_name)

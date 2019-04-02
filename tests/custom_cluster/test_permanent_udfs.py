@@ -505,10 +505,14 @@ class TestUdfPersistence(CustomClusterTestSuite):
       ('udfbin', 'org.apache.hadoop.hive.ql.udf.UDFBin'),
       ('udfhex', 'org.apache.hadoop.hive.ql.udf.UDFHex'),
       ('udfconv', 'org.apache.hadoop.hive.ql.udf.UDFConv'),
-      ('udfhour', 'org.apache.hadoop.hive.ql.udf.UDFHour'),
+      # TODO(Vihang) UDFHour was moved from UDF to GenericUDF in Hive 3
+      # Add support for GenericUDFs to handle such cases
+      # ('udfhour', 'org.apache.hadoop.hive.ql.udf.UDFHour'),
       ('udflike', 'org.apache.hadoop.hive.ql.udf.UDFLike'),
       ('udfsign', 'org.apache.hadoop.hive.ql.udf.UDFSign'),
-      ('udfyear', 'org.apache.hadoop.hive.ql.udf.UDFYear'),
+      # TODO(Vihang) UDFYear moved to GenericUDF in Hive 3
+      # Add support for GenericUDFs
+      # ('udfyear', 'org.apache.hadoop.hive.ql.udf.UDFYear'),
       ('udfascii','org.apache.hadoop.hive.ql.udf.UDFAscii')
   ]
 
