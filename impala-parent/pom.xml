@@ -41,8 +41,9 @@ under the License.
     <impalad>localhost</impalad>
     <testExecutionMode>reduced</testExecutionMode>
     <hadoop.version>${cdh.hadoop.version}</hadoop.version>
-    <hive.version>${cdh.hive.version}</hive.version>
-    <hive.major.version>2</hive.major.version>
+    <hive.version>${env.IMPALA_HIVE_VERSION}</hive.version>
+    <hive.major.version>${env.IMPALA_HIVE_MAJOR_VERSION}</hive.major.version>
+    <hive.storage.api.version>2.3.0.${env.IMPALA_HIVE_VERSION}</hive.storage.api.version>
     <sentry.version>${cdh.sentry.version}</sentry.version>
     <hbase.version>${cdh.hbase.version}</hbase.version>
     <parquet.version>${cdh.apache-parquet.version}</parquet.version>
@@ -138,6 +139,14 @@ under the License.
       <name>Cloudera Third Party Repository</name>
       <snapshots>
         <enabled>false</enabled>
+      </snapshots>
+    </repository>
+    <repository>
+      <id>hwx.public.repo</id>
+      <url>http://nexus-private.hortonworks.com/nexus/content/groups/public</url>
+      <name>Hortonworks public repository</name>
+      <snapshots>
+        <enabled>true</enabled>
       </snapshots>
     </repository>
   </repositories>
