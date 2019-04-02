@@ -208,6 +208,7 @@ class DirectMetaProvider implements MetaProvider {
         throw new MetaException("Unexpected number of partition values for " +
           "partition " + vals + " (expected " + partitionColumnNames.size() + ")");
       }
+      //TODO(Vihang) switch to standalone-metastore FileUtils here
       String partName = FileUtils.makePartName(partitionColumnNames, p.getValues());
       if (!namesSet.contains(partName)) {
         throw new MetaException("HMS returned unexpected partition " + partName +

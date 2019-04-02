@@ -89,13 +89,17 @@ public class MetaStoreClientPool {
         LOG.trace("Creating MetaStoreClient. Pool Size = " + clientPool_.size());
       }
 
-      long retryDelaySeconds = hiveConf.getTimeVar(
-          HiveConf.ConfVars.METASTORE_CLIENT_CONNECT_RETRY_DELAY, TimeUnit.SECONDS);
+      //TODO (Vihang) - use MetastoreConf when updated to hive 3 deps
+      long retryDelaySeconds = hiveConf
+          .getTimeVar(HiveConf.ConfVars.METASTORE_CLIENT_CONNECT_RETRY_DELAY,
+              TimeUnit.SECONDS);
       long retryDelayMillis = retryDelaySeconds * 1000;
       long endTimeMillis = System.currentTimeMillis() + cnxnTimeoutSec * 1000;
       IMetaStoreClient hiveClient = null;
       while (true) {
         try {
+          //TODO (Vihang) - This method is changed to using Configuration instead of
+          // HiveConf in HMS 3
           hiveClient = RetryingMetaStoreClient.getProxy(hiveConf, dummyHookLoader,
               HiveMetaStoreClient.class.getName());
           break;

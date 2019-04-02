@@ -388,40 +388,72 @@ under the License.
 
     <dependency>
       <groupId>org.apache.hive</groupId>
-      <artifactId>hive-jdbc</artifactId>
+      <artifactId>hive-serde</artifactId>
       <version>${hive.version}</version>
-      <scope>test</scope>
       <exclusions>
-        <!-- Impala uses log4j v1; avoid pulling in slf4j handling for log4j2 -->
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-common</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-shims</artifactId>
+        </exclusion>
         <exclusion>
           <groupId>org.apache.logging.log4j</groupId>
           <artifactId>log4j-slf4j-impl</artifactId>
         </exclusion>
+        <!-- Similarly, avoid pulling in the "Log4j 1.2 Bridge" -->
         <exclusion>
           <groupId>org.apache.logging.log4j</groupId>
           <artifactId>log4j-1.2-api</artifactId>
         </exclusion>
         <exclusion>
-          <groupId>net.minidev</groupId>
-          <artifactId>json-smart</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-serde</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-shims</artifactId>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-api</artifactId>
         </exclusion>
       </exclusions>
     </dependency>
 
     <dependency>
       <groupId>org.apache.hive</groupId>
+      <artifactId>hive-common</artifactId>
+      <version>${hive.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-classification</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-shims</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-storage-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-slf4j-impl</artifactId>
+        </exclusion>
+        <!-- Similarly, avoid pulling in the "Log4j 1.2 Bridge" -->
+        <exclusion>
+          <groupId>org.apache.logging.log4j</groupId>
+          <artifactId>log4j-1.2-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.apache.hive</groupId>
+          <artifactId>hive-orc</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!--
+    <dependency>
+      <groupId>org.apache.hive</groupId>
       <artifactId>hive-hbase-handler</artifactId>
       <version>${hive.version}</version>
       <exclusions>
-        <!-- Impala uses log4j v1; avoid pulling in slf4j handling for log4j2 -->
+        Impala uses log4j v1; avoid pulling in slf4j handling for log4j2
         <exclusion>
           <groupId>org.apache.logging.log4j</groupId>
           <artifactId>log4j-slf4j-impl</artifactId>
@@ -430,12 +462,12 @@ under the License.
           <groupId>org.apache.logging.log4j</groupId>
           <artifactId>log4j-1.2-api</artifactId>
         </exclusion>
-        <!-- https://issues.apache.org/jira/browse/HADOOP-14903 -->
+        https://issues.apache.org/jira/browse/HADOOP-14903
         <exclusion>
           <groupId>net.minidev</groupId>
           <artifactId>json-smart</artifactId>
         </exclusion>
-        <!-- TODO (Vihang) this is also bring in hive-exec which we don't want-->
+        TODO (Vihang) this is also bring in hive-exec which we don't want
         <exclusion>
           <groupId>org.apache.hive</groupId>
           <artifactId>hive-llap-tez</artifactId>
@@ -446,6 +478,7 @@ under the License.
         </exclusion>
       </exclusions>
     </dependency>
+ -->
 
     <dependency>
       <groupId>org.apache.hive</groupId>
