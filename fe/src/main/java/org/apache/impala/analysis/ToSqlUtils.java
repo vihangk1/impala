@@ -124,6 +124,7 @@ public class ToSqlUtils {
     // So, do the check on an upper-case version of the identifier.
     // Hive uses ANTLRNoCaseStringStream to upper-case text, but that
     // class is a non-static inner class so we can't use it here.
+    //TODO(Vihang) should be included in the shaded hive-exec
     HiveLexer hiveLexer = new HiveLexer(new ANTLRStringStream(ident.toUpperCase()));
     try {
       Token t = hiveLexer.nextToken();

@@ -216,6 +216,9 @@ public class DescribeResultFactory {
     hiveTable.setTTable(msTable);
     StringBuilder sb = new StringBuilder();
     // First add all the columns (includes partition columns).
+    //TODO(Vihang) its weird to depend on this since it pulls in hive-exec which is huge.
+    //May be a better way to do this is to move MetaDataFormatUtils to
+    // standalone-metastore project
     sb.append(MetaDataFormatUtils.getAllColumnsInformation(msTable.getSd().getCols(),
         msTable.getPartitionKeys(), true, false, true));
     // Add the extended table metadata information.
