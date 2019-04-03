@@ -343,7 +343,6 @@ under the License.
         </exclusion>
       </exclusions>
     </dependency>
-    -->
 
     <dependency>
       <groupId>org.apache.hive</groupId>
@@ -377,79 +376,12 @@ under the License.
         </exclusion>
       </exclusions>
     </dependency>
+    -->
 
     <dependency>
-      <groupId>org.apache.hive</groupId>
-      <artifactId>hive-service-rpc</artifactId>
-      <version>${hive.version}</version>
-    </dependency>
-
-    <!-- TODO(Vihang) may be shade this to a reduce to dependency to only a few files -->
-    <dependency>
-      <groupId>org.apache.hive</groupId>
-      <artifactId>hive-serde</artifactId>
-      <version>${hive.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-common</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-shims</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-service-rpc</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-slf4j-impl</artifactId>
-        </exclusion>
-        <!-- Similarly, avoid pulling in the "Log4j 1.2 Bridge" -->
-        <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-1.2-api</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-api</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
-    <!-- TODO (Vihang) This can be potentially be removed when we move to Hive 3.1 -->
-    <dependency>
-      <groupId>org.apache.hive</groupId>
-      <artifactId>hive-common</artifactId>
-      <version>${hive.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-classification</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-shims</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-storage-api</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-slf4j-impl</artifactId>
-        </exclusion>
-        <!-- Similarly, avoid pulling in the "Log4j 1.2 Bridge" -->
-        <exclusion>
-          <groupId>org.apache.logging.log4j</groupId>
-          <artifactId>log4j-1.2-api</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hive</groupId>
-          <artifactId>hive-orc</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>org.apache.impala</groupId>
+      <artifactId>impala-shaded-deps</artifactId>
+      <version>${project.version}</version>
     </dependency>
 
     <dependency>
