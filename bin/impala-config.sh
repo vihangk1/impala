@@ -173,7 +173,26 @@ export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
 export USE_CDP_HIVE=${USE_CDP_HIVE-false}
 if $USE_CDP_HIVE; then
-  export IMPALA_HIVE_VERSION=3.1.0.6.0.99.0-45
+  # When USE_CDP_HIVE is set we use the latest hive version available to deply in minicluster
+  export IMPALA_HIVE_VERSION=${CDP_HIVE_VERSION}
+  export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
+  # Set the path to the hive_metastore.thrift which is used to build thrift code
+  export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-src/standalone-metastore/src/main/thrift
+  # It is likely that devs will want to with both the versions of metastore
+  # if cdp hive is being used change the metastore db name, so we don't have to
+  # format the metastore db everytime we switch between hive versions
+  export METASTORE_DB=${METASTORE_DB-"$(cut -c-59 <<< HMS$ESCAPED_IMPALA_HOME)_cdp"}
+  export IMPALA_HIVE_METASTORE_ARTIFACTID=hive-standalone-metastore
+  # Temporary version of Tez, patched with the fix for TEZ-1348:
+  # https://github.com/apache/tez/pull/40
+  # We'll switch to a non-"todd" version of Tez once that fix is integrated.
+  # For now, if you're bumping the CDP build number, you'll need to download
+  # this tarball from an earlier build and re-upload it to the new directory
+  # in the toolchain bucket.
+  #
+  # TODO(todd) switch to an official build.
+  export IMPALA_TEZ_VERSION=0.10.0-todd-6fcc41e5798b.1
+  export TEZ_HOME="$CDP_COMPONENTS_HOME/tez-${IMPALA_TEZ_VERSION}-minimal"
 else
   export IMPALA_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
 fi
