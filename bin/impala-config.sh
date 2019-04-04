@@ -204,11 +204,22 @@ if $USE_CDP_HIVE; then
   # if cdp hive is being used change the metastore db name, so we don't have to
   # format the metastore db everytime we switch between hive versions
   export METASTORE_DB=${METASTORE_DB-"$(cut -c-59 <<< HMS$ESCAPED_IMPALA_HOME)_cdp"}
+  # Temporary version of Tez, patched with the fix for TEZ-1348:
+  # https://github.com/apache/tez/pull/40
+  # We'll switch to a non-"todd" version of Tez once that fix is integrated.
+  # For now, if you're bumping the CDP build number, you'll need to download
+  # this tarball from an earlier build and re-upload it to the new directory
+  # in the toolchain bucket.
+  #
+  # TODO(todd) switch to an official build.
+  export IMPALA_TEZ_VERSION=0.10.0-todd-6fcc41e5798b
 else
   export MINICLUSTER_HIVE_VERSION=${CDH_HIVE_VERSION}
   export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-${CDH_BUILD_NUMBER}/hive-${MINICLUSTER_HIVE_VERSION}"
   export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
+  unset IMPALA_TEZ_VERSION
 fi
+
 export PATH="$HIVE_HOME/bin:$PATH"
 
 # When IMPALA_(CDH_COMPONENT)_URL are overridden, they may contain '$(platform_label)'
