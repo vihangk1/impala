@@ -25,7 +25,6 @@ import java.util.Objects;
 import org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
-import org.apache.hadoop.hive.ql.metadata.formatting.MetaDataFormatUtils;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.FeDb;
 import org.apache.impala.catalog.FeTable;
@@ -219,6 +218,9 @@ public class DescribeResultFactory {
     //TODO(Vihang) its weird to depend on this since it pulls in hive-exec which is huge.
     //May be a better way to do this is to move MetaDataFormatUtils to
     // standalone-metastore project
+    //TODO (Vihang) this API is changed in Hive-3 so will need to add a shim here
+    //figure out a way to reinstate this. Describe table will not work
+    /*
     sb.append(MetaDataFormatUtils.getAllColumnsInformation(msTable.getSd().getCols(),
         msTable.getPartitionKeys(), true, false, true));
     // Add the extended table metadata information.
@@ -239,7 +241,7 @@ public class DescribeResultFactory {
         resultRow.addToColVals(colVal);
       }
       result.results.add(resultRow);
-    }
+    }*/
     return result;
   }
 
