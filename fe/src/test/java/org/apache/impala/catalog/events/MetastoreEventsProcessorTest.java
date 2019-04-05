@@ -19,7 +19,6 @@ package org.apache.impala.catalog.events;
 
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.ALTER_TABLE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.CREATE_DATABASE;
-import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.CREATE_TABLE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.DROP_DATABASE;
 import static org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType.DROP_TABLE;
 import static org.junit.Assert.assertEquals;
@@ -50,6 +49,7 @@ import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
+import org.apache.hadoop.hive.metastore.messaging.MessageBuilder;
 import org.apache.hadoop.hive.metastore.messaging.MessageFactory;
 import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.authorization.NoneAuthorizationFactory;
@@ -95,7 +95,6 @@ import org.apache.impala.thrift.TDropDbParams;
 import org.apache.impala.thrift.TDropTableOrViewParams;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
-import org.apache.impala.thrift.THdfsCachingOp;
 import org.apache.impala.thrift.THdfsFileFormat;
 import org.apache.impala.thrift.TOwnerType;
 import org.apache.impala.thrift.TPartitionDef;
@@ -1050,7 +1049,8 @@ public class MetastoreEventsProcessorTest {
     fakeEvent.setTableName(tblName);
     fakeEvent.setDbName(dbName);
     fakeEvent.setEventId(eventIdGenerator.incrementAndGet());
-    fakeEvent.setMessage(MetastoreEventsProcessor.getMessageFactory()
+    //TODO (Vihang) this may not compiled against hive 2
+    fakeEvent.setMessage(MessageBuilder.getInstance()
         .buildAlterTableMessage(tableBefore, tableAfter, false, -1L).toString());
     fakeEvent.setEventType("ALTER_TABLE");
     return fakeEvent;

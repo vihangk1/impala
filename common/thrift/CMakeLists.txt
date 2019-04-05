@@ -158,7 +158,7 @@ set(HIVE_THRIFT_SOURCE_DIR "hive-$ENV{IMPALA_HIVE_MAJOR_VERSION}-api")
 set(TCLI_SERVICE_THRIFT "${HIVE_THRIFT_SOURCE_DIR}/TCLIService.thrift")
 message("Using Thrift compiler: ${THRIFT_COMPILER}")
 message("Using Thrift 11 compiler: ${THRIFT11_COMPILER}")
-set(THRIFT_INCLUDE_DIR_OPTION -I ${THRIFT_CONTRIB_DIR} -I $ENV{HIVE_SRC_DIR}/metastore/if
+set(THRIFT_INCLUDE_DIR_OPTION -I ${THRIFT_CONTRIB_DIR} -I $ENV{HIVE_METASTORE_THRIFT_DIR}
   -I ${HIVE_THRIFT_SOURCE_DIR})
 set(BE_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/be/generated-sources)
 set(FE_OUTPUT_DIR ${CMAKE_SOURCE_DIR}/fe/generated-sources)
@@ -244,6 +244,10 @@ add_custom_command(OUTPUT hive-2-api/TCLIService.thrift
   DEPENDS hive-1-api/TCLIService.thrift
 )
 
+add_custom_command(OUTPUT hive-3-api/TCLIService.thrift
+  COMMAND cp hive-2-api/TCLIService.thrift hive-3-api/TCLIService.thrift
+  DEPENDS hive-2-api/TCLIService.thrift
+)
 # Create a build command for each of the thrift src files and generate
 # a list of files they produce
 THRIFT_GEN(THRIFT_ALL_FILES ${SRC_FILES})

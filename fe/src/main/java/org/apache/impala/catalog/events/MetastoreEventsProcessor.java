@@ -28,11 +28,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.NotificationEventResponse;
+import org.apache.hadoop.hive.metastore.conf.MetastoreConf;
+import org.apache.hadoop.hive.metastore.messaging.MessageDeserializer;
 import org.apache.hadoop.hive.metastore.messaging.MessageFactory;
-import org.apache.hadoop.hive.metastore.messaging.json.JSONMessageFactory;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
@@ -167,8 +169,9 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   private static final Logger LOG =
       LoggerFactory.getLogger(MetastoreEventsProcessor.class);
 
-  private static final MessageFactory messageFactory =
-      JSONMessageFactory.getInstance();
+  //TODO(Vihang) Check if this compiles against Hive-2
+  private static final MessageDeserializer messageFactory =
+      MessageFactory.getDefaultInstance(new HiveConf()).getDeserializer();
 
   private static MetastoreEventsProcessor instance;
 
@@ -600,7 +603,7 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     return metastoreEventFactory_;
   }
 
-  public static MessageFactory getMessageFactory() {
+  public static MessageDeserializer getMessageDeserializer() {
     return messageFactory;
   }
 }

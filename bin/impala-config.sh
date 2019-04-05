@@ -161,7 +161,7 @@ fi
 export CDH_DOWNLOAD_HOST
 export CDH_MAJOR_VERSION=6
 export CDH_BUILD_NUMBER=909265
-export CDP_BUILD_NUMBER=976603
+export CDP_BUILD_NUMBER=1009524
 export IMPALA_HADOOP_VERSION=3.0.0-cdh6.x-SNAPSHOT
 export IMPALA_HBASE_VERSION=2.1.0-cdh6.x-SNAPSHOT
 export IMPALA_SENTRY_VERSION=2.1.0-cdh6.x-SNAPSHOT
@@ -172,8 +172,9 @@ export IMPALA_LLAMA_MINIKDC_VERSION=1.0.0
 export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
 export USE_CDP_HIVE=${USE_CDP_HIVE-false}
+export CDP_HIVE_VERSION=${CDP_HIVE_VERSION-3.1.0.6.0.99.0-38}
 if $USE_CDP_HIVE; then
-  export IMPALA_HIVE_VERSION=3.1.0.6.0.99.0-9
+  export IMPALA_HIVE_VERSION=${CDP_HIVE_VERSION}
 else
   export IMPALA_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
 fi
@@ -534,16 +535,18 @@ export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 
 
 # Extract the first component of the hive version.
-export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
-if $USE_CDP_HIVE; then
-  export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
-else
-  export HIVE_HOME="$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/"
-fi
-export PATH="$HIVE_HOME/bin:$PATH"
 # Allow overriding of Hive source location in case we want to build Impala without
 # a complete Hive build.
 export HIVE_SRC_DIR=${HIVE_SRC_DIR_OVERRIDE:-"${HIVE_HOME}/src"}
+export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
+if $USE_CDP_HIVE; then
+  export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
+  export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/standalone-metastore/src/main/thrift
+else
+  export HIVE_HOME="$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/"
+  export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/metastore/if
+fi
+export PATH="$HIVE_HOME/bin:$PATH"
 # To configure Hive logging, there's a hive-log4j2.properties[.template]
 # file in fe/src/test/resources. To get it into the classpath earlier
 # than the hive-log4j2.properties file included in some Hive jars,
