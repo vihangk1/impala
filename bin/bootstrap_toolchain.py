@@ -456,6 +456,7 @@ def download_cdp_hive(toolchain_root):
 
   version = os.environ.get("IMPALA_HIVE_VERSION")
   # TODO the naming convention of the CDP Hive is different than cdh6.x hive
+  # We should repackage the binaries to rename the top level directories consistently
   # The tar balls are named for example like apache-hive-3.1.0.6.0.99.0-9-bin.tar.gz
   dir_name = "apache-hive-{0}-bin".format(version)
   pkg_directory = os.path.join(cdp_components_home, dir_name)
@@ -472,7 +473,7 @@ def download_cdp_hive(toolchain_root):
   file_name = "{0}.tar.gz".format(dir_name)
   download_path = url_prefix + file_name
   wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
-
+  
 
 if __name__ == "__main__":
   """Validates the presence of $IMPALA_HOME and $IMPALA_TOOLCHAIN in the environment.-

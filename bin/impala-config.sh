@@ -537,13 +537,16 @@ export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 # Extract the first component of the hive version.
 # Allow overriding of Hive source location in case we want to build Impala without
 # a complete Hive build.
-export HIVE_SRC_DIR=${HIVE_SRC_DIR_OVERRIDE:-"${HIVE_HOME}/src"}
 export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
 if $USE_CDP_HIVE; then
+  # TODO(Vihang) we should repackage the tarballs so that the src and binaries are extracted
+  # in the same directory
   export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
+  export HIVE_SRC_DIR="${CDP_COMPONENTS_HOME}/hive-${IMPALA_HIVE_VERSION}"
   export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/standalone-metastore/src/main/thrift
 else
   export HIVE_HOME="$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/"
+  export HIVE_SRC_DIR=${HIVE_SRC_DIR_OVERRIDE:-"${HIVE_HOME}/src"}
   export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/metastore/if
 fi
 export PATH="$HIVE_HOME/bin:$PATH"
