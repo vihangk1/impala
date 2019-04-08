@@ -545,7 +545,8 @@ if $USE_CDP_HIVE; then
   export HIVE_SRC_DIR="${CDP_COMPONENTS_HOME}/hive-${IMPALA_HIVE_VERSION}"
   export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/standalone-metastore/src/main/thrift
 else
-  export HIVE_HOME="$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/"
+  # when using NO_THIRDPARTY CDH_COMPONENTS_HOME may not have hive, always use toolchain
+  export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER/hive-${IMPALA_HIVE_VERSION}"
   export HIVE_SRC_DIR=${HIVE_SRC_DIR_OVERRIDE:-"${HIVE_HOME}/src"}
   export HIVE_METASTORE_THRIFT_DIR=${HIVE_SRC_DIR}/metastore/if
 fi
