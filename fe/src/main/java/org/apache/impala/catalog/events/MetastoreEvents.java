@@ -186,7 +186,7 @@ public class MetastoreEvents {
         metastoreEvents.add(get(event));
       }
       Iterator<MetastoreEvent> it = metastoreEvents.iterator();
-      // filter out the create events which has a corresponding drop event later
+      // filter out the create events which has a corresponding drop event later`
       int sizeBefore = metastoreEvents.size();
       int numFilteredEvents = 0;
       int i = 0;

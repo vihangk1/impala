@@ -537,7 +537,7 @@ export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 # a complete Hive build.
 export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
 # Set the path to the hive_metastore.thrift which is used to build thrift code
-export HIVE_METASTORE_THRIFT_DIR=${CDP_COMPONENTS_HOME}/hive-${IMPALA_HIVE_VERSION}/standalone-metastore/src/main/thrift
+export HIVE_METASTORE_THRIFT_DIR=$HIVE_HOME/src/standalone-metastore/src/main/thrift
 # To configure Hive logging, there's a hive-log4j2.properties[.template]
 # file in fe/src/test/resources. To get it into the classpath earlier
 # than the hive-log4j2.properties file included in some Hive jars,

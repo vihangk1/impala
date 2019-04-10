@@ -469,12 +469,6 @@ def download_cdp_hive(toolchain_root):
   download_path = url_prefix + file_name
   wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
 
-  # In CDP the source tarball is different
-  dir_name = "hive-{0}-source".format(version)
-  file_name = "{0}.tar.gz".format(dir_name)
-  download_path = url_prefix + file_name
-  wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
-  
 
 if __name__ == "__main__":
   """Validates the presence of $IMPALA_HOME and $IMPALA_TOOLCHAIN in the environment.-
