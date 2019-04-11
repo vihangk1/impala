@@ -63,7 +63,7 @@ done
 # Kill for a clean start.
 ${CLUSTER_BIN}/kill-hive-server.sh &> /dev/null
 
-export HIVE_METASTORE_HADOOP_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=30010"
+export HIVE_METASTORE_HADOOP_OPTS="-verbose:class -Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=30010"
 
 # If this is CDP Hive we need to manually add the sentry jars in the classpath since
 # CDH Hive metastore scripts do not do so. This is currently to make sure that we can run
