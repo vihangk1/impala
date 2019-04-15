@@ -25,7 +25,8 @@ import java.util.Objects;
 import org.apache.hadoop.hive.metastore.api.PrincipalPrivilegeSet;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.hadoop.hive.metastore.api.PrivilegeGrantInfo;
-import org.apache.impala.catalog.Column;
+import org.apache.hadoop.hive.ql.metadata.formatting.MetaDataFormatUtils;
+  import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.FeDb;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.KuduColumn;
@@ -39,6 +40,7 @@ import org.apache.impala.thrift.TResultRow;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
+import org.apache.impala.util.MetadataFormatUtils;
 
 /**
  * Builds results for DESCRIBE DATABASE statements by constructing and
@@ -215,16 +217,10 @@ public class DescribeResultFactory {
     hiveTable.setTTable(msTable);
     StringBuilder sb = new StringBuilder();
     // First add all the columns (includes partition columns).
-    //TODO(Vihang) its weird to depend on this since it pulls in hive-exec which is huge.
-    //May be a better way to do this is to move MetaDataFormatUtils to
-    // standalone-metastore project
-    //TODO (Vihang) this API is changed in Hive-3 so will need to add a shim here
-    //figure out a way to reinstate this. Describe table will not work
-    /*
-    sb.append(MetaDataFormatUtils.getAllColumnsInformation(msTable.getSd().getCols(),
+    sb.append(MetadataFormatUtils.getAllColumnsInformation(msTable.getSd().getCols(),
         msTable.getPartitionKeys(), true, false, true));
     // Add the extended table metadata information.
-    sb.append(MetaDataFormatUtils.getTableInformation(hiveTable));
+    sb.append(MetaDataFormatUtils.getTableInformation(hiveTable, false));
 
     for (String line: sb.toString().split("\n")) {
       // To match Hive's HiveServer2 output, split each line into multiple column
@@ -241,7 +237,7 @@ public class DescribeResultFactory {
         resultRow.addToColVals(colVal);
       }
       result.results.add(resultRow);
-    }*/
+    }
     return result;
   }
 

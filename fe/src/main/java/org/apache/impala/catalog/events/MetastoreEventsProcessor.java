@@ -169,7 +169,6 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   private static final Logger LOG =
       LoggerFactory.getLogger(MetastoreEventsProcessor.class);
 
-  //TODO(Vihang) Check if this compiles against Hive-2
   private static final MessageDeserializer messageFactory =
       MessageFactory.getDefaultInstance(new HiveConf()).getDeserializer();
 
