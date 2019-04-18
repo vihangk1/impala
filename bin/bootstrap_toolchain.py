@@ -461,13 +461,20 @@ def download_cdp_hive(toolchain_root):
   # The tar balls are named for example like apache-hive-3.1.0.6.0.99.0-9-bin.tar.gz
   dir_name = "apache-hive-{0}-bin".format(version)
   pkg_directory = os.path.join(cdp_components_home, dir_name)
-  if os.path.isdir(pkg_directory):
-    return
-
+  if not os.path.isdir(pkg_directory):
   # Download the package if it doesn't exist
-  file_name = "{0}.tar.gz".format(dir_name)
-  download_path = url_prefix + file_name
-  wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
+    file_name = "{0}.tar.gz".format(dir_name)
+    download_path = url_prefix + file_name
+    wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
+
+  dir_name = "apache-hive-{0}-src".format(version)
+  pkg_directory = os.path.join(cdp_components_home, dir_name)
+  if not os.path.isdir(pkg_directory):
+    # Download the package if it doesn't exist
+    file_name = "{0}.tar.gz".format(dir_name)
+    download_path = url_prefix + file_name
+    wget_and_unpack_package(download_path, file_name, cdp_components_home, False)
+
 
 
 if __name__ == "__main__":

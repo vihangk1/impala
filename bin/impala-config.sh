@@ -161,7 +161,7 @@ export CDH_DOWNLOAD_HOST
 export CDH_MAJOR_VERSION=6
 export CDH_BUILD_NUMBER=1009254
 # Custom CDP Hive build which has fixes for HIVE-21586 and HIVE-21596
-export CDP_BUILD_NUMBER=9999994
+export CDP_BUILD_NUMBER=9999992
 export IMPALA_HADOOP_VERSION=3.0.0-cdh6.x-SNAPSHOT
 export IMPALA_HBASE_VERSION=2.1.0-cdh6.x-SNAPSHOT
 export IMPALA_SENTRY_VERSION=2.1.0-cdh6.x-SNAPSHOT
@@ -172,7 +172,7 @@ export IMPALA_LLAMA_MINIKDC_VERSION=1.0.0
 export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
 # IMPALA_HIVE_VERSION denotes the version of hive build which is used to build impala
-export IMPALA_HIVE_VERSION=${IMPALA_HIVE_VERSION-3.1.0.6.0.99.0-38}
+export IMPALA_HIVE_VERSION=${IMPALA_HIVE_VERSION-3.1.0.6.0.99.0-38-0e7f6337a50}
 # CDH hive version is used to spin up minicluster when USE_CDP_HIVE is false
 export CDH_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
 # set the thirdparty download flag to be used to download cdh_components below
@@ -540,7 +540,7 @@ export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 # a complete Hive build.
 export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
 # Set the path to the hive_metastore.thrift which is used to build thrift code
-export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin/src/standalone-metastore/src/main/thrift
+export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-src/standalone-metastore/src/main/thrift
 # To configure Hive logging, there's a hive-log4j2.properties[.template]
 # file in fe/src/test/resources. To get it into the classpath earlier
 # than the hive-log4j2.properties file included in some Hive jars,
