@@ -213,6 +213,7 @@ if $USE_CDP_HIVE; then
   #
   # TODO(todd) switch to an official build.
   export IMPALA_TEZ_VERSION=0.10.0-todd-6fcc41e5798b
+  export TEZ_HOME="$CDP_COMPONENTS_HOME/tez-${IMPALA_TEZ_VERSION}-minimal"
 else
   export MINICLUSTER_HIVE_VERSION=${CDH_HIVE_VERSION}
   export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-${CDH_BUILD_NUMBER}/hive-${MINICLUSTER_HIVE_VERSION}"

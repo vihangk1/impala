@@ -81,7 +81,8 @@ if hive_major_version >= 3:
   CONFIG.update({
    'hive.tez.container.size': '512',
    'hive.txn.manager': 'org.apache.hadoop.hive.ql.lockmgr.DbTxnManager',
-   'tez.local.mode': 'true'})
+   'tez.local.mode': 'true',
+   'hive.support.concurrency': 'true'})
 else:
   CONFIG.update({
    # TODO(vihang) Disabled for HMS3.

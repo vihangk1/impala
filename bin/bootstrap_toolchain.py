@@ -546,6 +546,8 @@ if __name__ == "__main__":
   if use_cdp_hive:
     cdp_components.append("apache-hive-{0}-bin"
                           .format(os.environ.get("IMPALA_HIVE_VERSION")))
+    cdp_components.append("tez-{0}-minimal"
+                           .format(os.environ.get("IMPALA_TEZ_VERSION")))
   download_path_prefix = \
     "https://{0}/build/cdp_components/{1}/tarballs".format(toolchain_host,
                                                            cdp_build_number)
