@@ -171,33 +171,13 @@ export IMPALA_AVRO_JAVA_VERSION=1.8.2-cdh6.x-SNAPSHOT
 export IMPALA_LLAMA_MINIKDC_VERSION=1.0.0
 export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
-# IMPALA_HIVE_VERSION denotes the version of hive build which is used to build impala
-export IMPALA_HIVE_VERSION=${IMPALA_HIVE_VERSION-3.1.0.6.0.99.0-38-0e7f6337a50}
-# CDH hive version is used to spin up minicluster when USE_CDP_HIVE is false
-export CDH_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
-# set the thirdparty download flag to be used to download cdh_components below
-if [ -d "$IMPALA_HOME/thirdparty" ]; then
-  NO_THIRDPARTY=false
-else
-  NO_THIRDPARTY=true
-fi
-# If true, download and use the CDH components from S3 instead of the ones
-# in $IMPALA_HOME/thirdparty.
-export DOWNLOAD_CDH_COMPONENTS=${DOWNLOAD_CDH_COMPONENTS-"$NO_THIRDPARTY"}
-# The directory in which all the thirdparty CDH components live.
-if [ "${DOWNLOAD_CDH_COMPONENTS}" = true ]; then
-  export CDH_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER"
-else
-  export CDH_COMPONENTS_HOME="$IMPALA_HOME/thirdparty"
-fi
-
+export CDH_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER"
 export CDP_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdp_components-$CDP_BUILD_NUMBER"
-ESCAPED_IMPALA_HOME=$(sed "s/[^0-9a-zA-Z]/_/g" <<< "$IMPALA_HOME")
-# When USE_CDP_HIVE is set we use the latest hive version available to deply in minicluster
 export USE_CDP_HIVE=${USE_CDP_HIVE-false}
+ESCAPED_IMPALA_HOME=$(sed "s/[^0-9a-zA-Z]/_/g" <<< "$IMPALA_HOME")
 if $USE_CDP_HIVE; then
   # When USE_CDP_HIVE is set we use the latest hive version available to deply in minicluster
-  export IMPALA_HIVE_VERSION=${CDP_HIVE_VERSION}
+  export IMPALA_HIVE_VERSION=3.1.0.6.0.99.0-38-0e7f6337a50
   export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
   # Set the path to the hive_metastore.thrift which is used to build thrift code
   export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-src/standalone-metastore/src/main/thrift
@@ -217,10 +197,17 @@ if $USE_CDP_HIVE; then
   export IMPALA_TEZ_VERSION=0.10.0-todd-6fcc41e5798b.1
   export TEZ_HOME="$CDP_COMPONENTS_HOME/tez-${IMPALA_TEZ_VERSION}-minimal"
 else
-  export IMPALA_HIVE_VERSION=${CDH_HIVE_VERSION}
+  # CDH hive version is used to spin up minicluster when USE_CDP_HIVE is false
+  export IMPALA_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
   export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-${CDH_BUILD_NUMBER}/hive-${IMPALA_HIVE_VERSION}"
+  export HIVE_METASTORE_THRIFT_DIR=$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/src/metastore/if
   export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
+  export IMPALA_HIVE_METASTORE_ARTIFACTID=hive-metastore
 fi
+# Extract the first component of the hive version.
+# Allow overriding of Hive source location in case we want to build Impala without
+# a complete Hive build.
+export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
 export PATH="$HIVE_HOME/bin:$PATH"
 
 # When IMPALA_(CDH_COMPONENT)_URL are overridden, they may contain '$(platform_label)'
@@ -550,12 +537,6 @@ export SENTRY_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 export RANGER_HOME="${CDP_COMPONENTS_HOME}/ranger-${IMPALA_RANGER_VERSION}-admin"
 export RANGER_CONF_DIR="$IMPALA_HOME/fe/src/test/resources"
 
-# Extract the first component of the hive version.
-# Allow overriding of Hive source location in case we want to build Impala without
-# a complete Hive build.
-export IMPALA_HIVE_MAJOR_VERSION=$(echo "$IMPALA_HIVE_VERSION" | cut -d . -f 1)
-# Set the path to the hive_metastore.thrift which is used to build thrift code
-export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-src/standalone-metastore/src/main/thrift
 # To configure Hive logging, there's a hive-log4j2.properties[.template]
 # file in fe/src/test/resources. To get it into the classpath earlier
 # than the hive-log4j2.properties file included in some Hive jars,
@@ -757,7 +738,6 @@ echo "LD_PRELOAD              = $LD_PRELOAD"
 echo "POSTGRES_JDBC_DRIVER    = $POSTGRES_JDBC_DRIVER"
 echo "IMPALA_TOOLCHAIN        = $IMPALA_TOOLCHAIN"
 echo "METASTORE_DB            = $METASTORE_DB"
-echo "DOWNLOAD_CDH_COMPONENTS = $DOWNLOAD_CDH_COMPONENTS"
 echo "IMPALA_MAVEN_OPTIONS    = $IMPALA_MAVEN_OPTIONS"
 echo "IMPALA_TOOLCHAIN_HOST   = $IMPALA_TOOLCHAIN_HOST"
 echo "CDH_BUILD_NUMBER        = $CDH_BUILD_NUMBER"

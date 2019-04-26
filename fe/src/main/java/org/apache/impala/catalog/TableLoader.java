@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.log4j.Logger;
 
 import com.google.common.base.Stopwatch;
@@ -37,9 +38,7 @@ public class TableLoader {
   private static final Logger LOG = Logger.getLogger(TableLoader.class);
 
   // Set of supported table types.
-  private static EnumSet<TableType> SUPPORTED_TABLE_TYPES = EnumSet
-      .of(TableType.EXTERNAL_TABLE, TableType.MANAGED_TABLE, TableType.VIRTUAL_VIEW,
-          TableType.MATERIALIZED_VIEW);
+  private static EnumSet<TableType> SUPPORTED_TABLE_TYPES = MetastoreShim.getTableTypes();
 
   private final CatalogServiceCatalog catalog_;
 

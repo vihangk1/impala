@@ -82,6 +82,11 @@
                 <include>org/apache/hive/common/HiveVersionAnnotation.class</include>
                 <include>com/google/**</include>
                 <include>org/joda/time/**</include> <!-- TODO(todd) relocate? -->
+                <!-- required for HMS2 dependencies -->
+                <include>org/apache/hadoop/hive/common/JavaUtils.class</include>
+                <include>org/apache/hadoop/hive/shims/Utils*</include>
+                <include>org/apache/hadoop/hive/common/ValidTxnList.class</include>
+                <include>org/apache/hadoop/hive/common/HiveStatsUtils.class</include>
               </includes>
             </filter>
             <!--

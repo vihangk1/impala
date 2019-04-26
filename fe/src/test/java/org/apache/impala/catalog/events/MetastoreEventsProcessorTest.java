@@ -48,10 +48,8 @@ import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
-import org.apache.hadoop.hive.metastore.client.builder.TableBuilder;
-import org.apache.hadoop.hive.metastore.messaging.MessageBuilder;
-import org.apache.hadoop.hive.metastore.messaging.MessageFactory;
-import org.apache.impala.authorization.AuthorizationConfig;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.impala.authorization.NoopAuthorizationFactory;
 import org.apache.impala.authorization.NoopAuthorizationFactory.NoopAuthorizationManager;
 import org.apache.impala.catalog.CatalogException;
@@ -70,6 +68,7 @@ import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventType;
 import org.apache.impala.catalog.events.MetastoreEventsProcessor.EventProcessorStatus;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.service.FeSupport;
 import org.apache.impala.testutil.CatalogServiceTestCatalog;
@@ -1126,9 +1125,9 @@ public class MetastoreEventsProcessorTest {
     fakeEvent.setTableName(tblName);
     fakeEvent.setDbName(dbName);
     fakeEvent.setEventId(eventIdGenerator.incrementAndGet());
-    //TODO (Vihang) this may not compiled against hive 2
-    fakeEvent.setMessage(MessageBuilder.getInstance()
-        .buildAlterTableMessage(tableBefore, tableAfter, false, -1L).toString());
+    fakeEvent.setMessage(
+        MetastoreShim.buildAlterTableMessage(tableBefore, tableAfter, false, -1L)
+            .toString());
     fakeEvent.setEventType("ALTER_TABLE");
     return fakeEvent;
   }
@@ -1787,24 +1786,34 @@ public class MetastoreEventsProcessorTest {
   private org.apache.hadoop.hive.metastore.api.Table getTestTable(String dbName,
       String tblName, Map<String, String> params, boolean isPartitioned)
       throws MetaException {
-    TableBuilder tblBuilder =
-        new TableBuilder()
-            .setTableName(tblName)
-            .setDbName(dbName)
-            .addTableParam("tblParamKey", "tblParamValue")
-            .addCol("c1", "string", "c1 description")
-            .addCol("c2", "string", "c2 description")
-            .setSerdeLib(HdfsFileFormat.PARQUET.serializationLib())
-            .setInputFormat(HdfsFileFormat.PARQUET.inputFormat())
-            .setOutputFormat(HdfsFileFormat.PARQUET.outputFormat());
-    // if params are provided use them
+    org.apache.hadoop.hive.metastore.api.Table tbl =
+        new org.apache.hadoop.hive.metastore.api.Table();
+    tbl.setDbName(dbName);
+    tbl.setTableName(tblName);
+    tbl.putToParameters("tblParamKey", "tblParamValue");
+    List<FieldSchema> cols = Lists.newArrayList(
+        new FieldSchema("c1","string","c1 description"),
+        new FieldSchema("c2", "string","c2 description"));
+
+    StorageDescriptor sd = new StorageDescriptor();
+    sd.setCols(cols);
+    sd.setInputFormat(HdfsFileFormat.PARQUET.inputFormat());
+    sd.setOutputFormat(HdfsFileFormat.PARQUET.outputFormat());
+
+    SerDeInfo serDeInfo = new SerDeInfo();
+    serDeInfo.setSerializationLib(HdfsFileFormat.PARQUET.serializationLib());
+    sd.setSerdeInfo(serDeInfo);
+    tbl.setSd(sd);
+
     if (params != null && !params.isEmpty()) {
-      tblBuilder.setTableParams(params);
+      tbl.setParameters(params);
     }
     if (isPartitioned) {
-      tblBuilder.addPartCol("p1", "string", "partition p1 description");
+      List<FieldSchema> pcols = Lists.newArrayList(
+          new FieldSchema("p1","string","partition p1 description"));
+      tbl.setPartitionKeys(pcols);
     }
-    return tblBuilder.build(hiveConf_);
+    return tbl;
   }
 
   /**
