@@ -38,6 +38,7 @@ under the License.
     <hadoop.version>${env.IMPALA_HADOOP_VERSION}</hadoop.version>
     <!-- We always compile with the latest Hive version we have -->
     <hive.version>${env.IMPALA_HIVE_VERSION}</hive.version>
+    <hive.metastore.artifactId>${env.IMPALA_HIVE_METASTORE_ARTIFACTID}</hive.metastore.artifactId>
     <avatica.version>1.10.0.3.1.0.0-SNAPSHOT</avatica.version>
     <hive.storage.api.version>2.3.0.${env.IMPALA_HIVE_VERSION}</hive.storage.api.version>
     <hive.major.version>${env.IMPALA_HIVE_MAJOR_VERSION}</hive.major.version>

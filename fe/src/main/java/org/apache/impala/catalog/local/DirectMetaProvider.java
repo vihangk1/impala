@@ -38,7 +38,6 @@ import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
-import org.apache.hadoop.hive.metastore.utils.FileUtils;
 import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.catalog.Function;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
@@ -46,6 +45,7 @@ import org.apache.impala.catalog.HdfsTable;
 import org.apache.impala.catalog.MetaStoreClientPool;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.common.Pair;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TBackendGflags;
 import org.apache.impala.thrift.TNetworkAddress;
@@ -208,7 +208,7 @@ class DirectMetaProvider implements MetaProvider {
         throw new MetaException("Unexpected number of partition values for " +
           "partition " + vals + " (expected " + partitionColumnNames.size() + ")");
       }
-      String partName = FileUtils.makePartName(partitionColumnNames, p.getValues());
+      String partName = MetastoreShim.makePartName(partitionColumnNames, p.getValues());
       if (!namesSet.contains(partName)) {
         throw new MetaException("HMS returned unexpected partition " + partName +
             " which was not requested. Requested: " + namesSet);

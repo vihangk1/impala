@@ -17,17 +17,28 @@
 
 package org.apache.impala.compat;
 
+import static org.apache.impala.service.MetadataOp.TABLE_TYPE_TABLE;
+import static org.apache.impala.service.MetadataOp.TABLE_TYPE_VIEW;
+
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import java.util.EnumSet;
 import java.util.List;
 
+import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.MetaStoreUtils;
+import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.InvalidOperationException;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.metastore.utils.MetaStoreUtils;
+import org.apache.hadoop.hive.metastore.messaging.AlterTableMessage;
+import org.apache.hadoop.hive.metastore.messaging.MessageDeserializer;
+import org.apache.hadoop.hive.metastore.messaging.json.ExtendedJSONMessageFactory;
 import org.apache.hive.service.rpc.thrift.TGetColumnsReq;
 import org.apache.hive.service.rpc.thrift.TGetFunctionsReq;
 import org.apache.hive.service.rpc.thrift.TGetSchemasReq;
@@ -79,8 +90,7 @@ public class MetastoreShim {
    */
   public static void updatePartitionStatsFast(Partition partition, Table tbl,
       Warehouse warehouse) throws MetaException {
-    MetaStoreUtils
-        .updatePartitionStatsFast(partition, tbl, warehouse, false, false, null, false);
+    MetaStoreUtils.updatePartitionStatsFast(partition, warehouse, null);
   }
 
   /**
@@ -125,5 +135,67 @@ public class MetastoreShim {
     TGetSchemasReq req = request.getGet_schemas_req();
     return MetadataOp.getSchemas(
         frontend, req.getCatalogName(), req.getSchemaName(), user);
+  }
+
+  // TableTypes supported in HMS 2
+  public static EnumSet<TableType> getTableTypes() {
+    return EnumSet
+        .of(TableType.EXTERNAL_TABLE, TableType.MANAGED_TABLE, TableType.VIRTUAL_VIEW);
+  }
+
+  /**
+   * Method which maps Metastore's TableType to Impala's table type. In metastore 2
+   * Materialized view is not supported
+   */
+  public static String mapToInternalTableType(String typeStr) {
+    String defaultTableType = TABLE_TYPE_TABLE;
+    TableType tType;
+
+    if (typeStr == null) return defaultTableType;
+    Preconditions.checkArgument(!"MATERIALIZED_VIEW".equals(typeStr.toUpperCase()),
+        "Materialized view is not supported in the metastore version 2");
+    try {
+      tType = TableType.valueOf(typeStr.toUpperCase());
+    } catch (Exception e) {
+      return defaultTableType;
+    }
+    switch (tType) {
+      case EXTERNAL_TABLE:
+      case MANAGED_TABLE:
+      case INDEX_TABLE:
+        return TABLE_TYPE_TABLE;
+      case VIRTUAL_VIEW:
+        return TABLE_TYPE_VIEW;
+      default:
+        return defaultTableType;
+    }
+  }
+
+  /**
+   * Wrapper method which returns ExtendedJSONMessageFactory in case Impala is
+   * building against Hive-2 to keep compatibility with Sentry
+   */
+  public static MessageDeserializer getMessageDeserializer() {
+    return ExtendedJSONMessageFactory.getInstance().getDeserializer();
+  }
+
+  /**
+   * Wrapper around FileUtils.makePartName to deal with package relocation in Hive 3
+   * @param partitionColNames
+   * @param values
+   * @return
+   */
+  public static String makePartName(List<String> partitionColNames, List<String> values) {
+    return FileUtils.makePartName(partitionColNames, values);
+  }
+
+  /**
+   * Wrapper method around message factory's build alter table message due to added
+   * arguments in hive 3.
+   */
+  @VisibleForTesting
+  public static AlterTableMessage buildAlterTableMessage(Table before, Table after,
+      boolean b, long l) {
+    return ExtendedJSONMessageFactory.getInstance().buildAlterTableMessage(before, after);
   }
 }
