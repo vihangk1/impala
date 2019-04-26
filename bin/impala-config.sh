@@ -171,13 +171,16 @@ export IMPALA_AVRO_JAVA_VERSION=1.8.2-cdh6.x-SNAPSHOT
 export IMPALA_LLAMA_MINIKDC_VERSION=1.0.0
 export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export KUDU_JAVA_VERSION=1.10.0-cdh6.x-SNAPSHOT
+export CDH_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
+export CDP_HIVE_VERSION=3.1.0.6.0.99.0-38-0e7f6337a50
 export CDH_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdh_components-$CDH_BUILD_NUMBER"
 export CDP_COMPONENTS_HOME="$IMPALA_TOOLCHAIN/cdp_components-$CDP_BUILD_NUMBER"
 export USE_CDP_HIVE=${USE_CDP_HIVE-false}
+export DOWNLOAD_CDH_COMPONENTS=true
 ESCAPED_IMPALA_HOME=$(sed "s/[^0-9a-zA-Z]/_/g" <<< "$IMPALA_HOME")
 if $USE_CDP_HIVE; then
   # When USE_CDP_HIVE is set we use the latest hive version available to deply in minicluster
-  export IMPALA_HIVE_VERSION=3.1.0.6.0.99.0-38-0e7f6337a50
+  export IMPALA_HIVE_VERSION=${CDP_HIVE_VERSION}
   export HIVE_HOME="$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-bin"
   # Set the path to the hive_metastore.thrift which is used to build thrift code
   export HIVE_METASTORE_THRIFT_DIR=$CDP_COMPONENTS_HOME/apache-hive-${IMPALA_HIVE_VERSION}-src/standalone-metastore/src/main/thrift
@@ -198,7 +201,7 @@ if $USE_CDP_HIVE; then
   export TEZ_HOME="$CDP_COMPONENTS_HOME/tez-${IMPALA_TEZ_VERSION}-minimal"
 else
   # CDH hive version is used to spin up minicluster when USE_CDP_HIVE is false
-  export IMPALA_HIVE_VERSION=2.1.1-cdh6.x-SNAPSHOT
+  export IMPALA_HIVE_VERSION=${CDH_HIVE_VERSION}
   export HIVE_HOME="$IMPALA_TOOLCHAIN/cdh_components-${CDH_BUILD_NUMBER}/hive-${IMPALA_HIVE_VERSION}"
   export HIVE_METASTORE_THRIFT_DIR=$CDH_COMPONENTS_HOME/hive-${IMPALA_HIVE_VERSION}/src/metastore/if
   export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
