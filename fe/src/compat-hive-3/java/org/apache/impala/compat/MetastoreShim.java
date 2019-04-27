@@ -21,12 +21,10 @@ import static org.apache.impala.service.MetadataOp.TABLE_TYPE_TABLE;
 import static org.apache.impala.service.MetadataOp.TABLE_TYPE_VIEW;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import java.util.EnumSet;
 import java.util.List;
 
 import org.apache.hadoop.hive.common.StatsSetupConst;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.Warehouse;
@@ -178,7 +176,8 @@ public class MetastoreShim {
 
   //hive-3 has a different class to encode and decode event messages
   private static final MessageEncoder eventMessageEncoder_ =
-      MessageFactory.getDefaultInstance(new HiveConf());
+      MessageFactory.getDefaultInstance(MetastoreConf.newMetastoreConf());
+
   /**
    * Wrapper method which returns HMS-3 Message factory in case Impala is
    * building against Hive-3

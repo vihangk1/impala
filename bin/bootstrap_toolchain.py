@@ -569,16 +569,15 @@ if __name__ == "__main__":
   download_cdh_components(toolchain_root, cdh_components, download_path_prefix)
 
   cdp_build_number = os.environ["CDP_BUILD_NUMBER"]
-  # We always download the CDP hive source since it has the hive_metastore.thrift which
-  # is needed for build
   cdp_components = [
     CdpComponent("ranger-{0}-admin".format(os.environ.get("IMPALA_RANGER_VERSION"))),
-    CdpComponent("apache-hive-{0}-src".format(os.environ.get("IMPALA_HIVE_VERSION"))),
   ]
   use_cdp_hive = os.getenv("USE_CDP_HIVE") == "true"
   if use_cdp_hive:
+    cdp_components.append(CdpComponent("apache-hive-{0}-src"
+                          .format(os.environ.get("IMPALA_HIVE_VERSION")))),
     cdp_components.append(CdpComponent("apache-hive-{0}-bin"
-                          .format(os.environ.get("IMPALA_HIVE_VERSION"))))
+                          .format(os.environ.get("IMPALA_HIVE_VERSION")))),
     cdp_components.append(CdpComponent(
         "tez-{0}-minimal".format(os.environ.get("IMPALA_TEZ_VERSION")),
         makedir=True))

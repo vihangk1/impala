@@ -59,7 +59,6 @@
               <includes>
                 <!-- TODO (Vihang) conf and common deps can be removed once we move to standalone-metastore -->
                 <include>org/apache/hadoop/hive/conf/**/*</include>
-                <include>org/apache/hadoop/hive/common/StatsSetupConst.class</include>
                 <include>org/apache/hadoop/hive/common/FileUtils*</include>
                 <!-- Needed to support describe formatted command compat with Hive --> 
                 <include>org/apache/hadoop/hive/ql/metadata/**/*</include>

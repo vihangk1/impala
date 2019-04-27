@@ -40,7 +40,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
@@ -137,11 +136,9 @@ public class MetastoreEventsProcessorTest {
   private static MetastoreEventsProcessor eventsProcessor_;
   private static final Logger LOG =
       LoggerFactory.getLogger(MetastoreEventsProcessorTest.class);
-  private static HiveConf hiveConf_;
 
   @BeforeClass
   public static void setUpTestEnvironment() throws TException, ImpalaException {
-    hiveConf_ = new HiveConf();
     catalog_ = CatalogServiceTestCatalog.create();
     catalogOpExecutor_ = new CatalogOpExecutor(catalog_,
         new NoopAuthorizationFactory().getAuthorizationConfig(),
