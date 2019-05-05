@@ -19,11 +19,6 @@ under the License.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
   <modelVersion>4.0.0</modelVersion>
-  <parent>
-    <groupId>com.cloudera.cdh</groupId>
-    <artifactId>cdh-root</artifactId>
-    <version>6.x-SNAPSHOT</version>
-  </parent>
   <groupId>org.apache.impala</groupId>
   <artifactId>impala-parent</artifactId>
   <version>0.1-SNAPSHOT</version>
@@ -40,31 +35,30 @@ under the License.
     <beeswax_port>21000</beeswax_port>
     <impalad>localhost</impalad>
     <testExecutionMode>reduced</testExecutionMode>
-    <hadoop.version>${cdh.hadoop.version}</hadoop.version>
+    <hadoop.version>${env.IMPALA_HADOOP_VERSION}</hadoop.version>
     <hive.version>${env.IMPALA_HIVE_VERSION}</hive.version>
-    <hive.major.version>${env.IMPALA_HIVE_MAJOR_VERSION}</hive.major.version>
     <hive.storage.api.version>2.3.0.${env.IMPALA_HIVE_VERSION}</hive.storage.api.version>
-    <sentry.version>${cdh.sentry.version}</sentry.version>
-    <hbase.version>${cdh.hbase.version}</hbase.version>
-    <parquet.version>${cdh.apache-parquet.version}</parquet.version>
-    <kite.version>${cdh.kite.version}</kite.version>
-    <thrift.version>${cdh.thrift.version}</thrift.version>
+    <hive.major.version>${env.IMPALA_HIVE_MAJOR_VERSION}</hive.major.version>
     <ranger.version>${env.IMPALA_RANGER_VERSION}</ranger.version>
     <postgres.jdbc.version>${env.IMPALA_POSTGRES_JDBC_DRIVER_VERSION}</postgres.jdbc.version>
+    <sentry.version>${env.IMPALA_SENTRY_VERSION}</sentry.version>
+    <hbase.version>${env.IMPALA_HBASE_VERSION}</hbase.version>
+    <parquet.version>${env.IMPALA_PARQUET_VERSION}</parquet.version>
+    <kite.version>${env.IMPALA_KITE_VERSION}</kite.version>
+    <thrift.version>0.9.3</thrift.version>
     <impala.extdatasrc.api.version>1.0-SNAPSHOT</impala.extdatasrc.api.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-    <kudu.version>${cdh.kudu.version}</kudu.version>
-    <commons-io.version>${cdh.commons-io.version}</commons-io.version>
-    <slf4j.version>${cdh.slf4j.version}</slf4j.version>
+    <kudu.version>${env.KUDU_JAVA_VERSION}</kudu.version>
+    <commons-io.version>2.6</commons-io.version>
+    <slf4j.version>1.7.25</slf4j.version>
     <junit.version>4.12</junit.version>
     <!-- Beware compatibility requirements with Thrift and
          KMS; see IMPALA-4210. -->
     <httpcomponents.core.version>4.4.9</httpcomponents.core.version>
     <yarn-extras.version>${project.version}</yarn-extras.version>
     <eclipse.output.directory>eclipse-classes</eclipse.output.directory>
-    <!-- Note: we don't use cdh.guava.version because it's more important
-         to match hive-exec.jar, which currently uses a non-harmonized
-         version and leaks itself onto our classpath -->
+    <!-- hive-exec seems to leak this version of guava onto our classpath,
+         so it's important to depend on the same one -->
     <guava.version>14.0.1</guava.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
