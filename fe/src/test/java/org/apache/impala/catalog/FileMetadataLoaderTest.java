@@ -24,8 +24,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
+import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.util.ListMap;
@@ -33,6 +38,7 @@ import org.junit.Test;
 
 import com.google.common.collect.Collections2;
 import com.google.common.collect.ImmutableList;
+import org.mockito.Mockito;
 
 
 public class FileMetadataLoaderTest {
@@ -83,6 +89,33 @@ public class FileMetadataLoaderTest {
           /* oldFds = */Collections.emptyList(), hostIndex, null);
       fml.load();
       assertEquals(0, fml.getLoadedFds().size());
+    }
+  }
+
+  @Test
+  public void testSkipHiddenDirectories() throws IOException {
+    Path sourcePath = new Path("hdfs://localhost:20500/test-warehouse/alltypes/");
+    Path tmpTestPath = new Path("hdfs://localhost:20500/tmp/test-filemetadata-loader");
+    Configuration conf = new Configuration();
+    try (FileSystem dstFs = tmpTestPath.getFileSystem(conf)) {
+      FileSystem srcFs = sourcePath.getFileSystem(conf);
+      //copy the file-structure of a valid table
+      FileUtil.copy(srcFs, sourcePath, dstFs, tmpTestPath, false, true, conf);
+      dstFs.deleteOnExit(tmpTestPath);
+      // create a hidden directory similar to what hive does
+      Path hiveStaging = new Path(tmpTestPath, ".hive-staging_hive_2019-06-13_1234");
+      dstFs.mkdirs(hiveStaging);
+      Path manifestDir = new Path(tmpTestPath, "_tmp.base_0000007");
+      dstFs.mkdirs(manifestDir);
+      dstFs.createNewFile(new Path(manifestDir, "000000_0.manifest"));
+      dstFs.createNewFile(new Path(hiveStaging, "tmp-stats"));
+      dstFs.createNewFile(new Path(hiveStaging, ".hidden-tmp-stats"));
+
+      FileMetadataLoader fml = new FileMetadataLoader(tmpTestPath, true,
+          Collections.emptyList(), new ListMap <>(), null);
+      fml.load();
+      assertEquals(24, fml.getStats().loadedFiles);
+      assertEquals(24, fml.getLoadedFds().size());
     }
   }
 

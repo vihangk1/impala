@@ -19,13 +19,13 @@ package org.apache.impala.common;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
+import java.util.function.Predicate;
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileUtil;
 import org.apache.hadoop.fs.LocalFileSystem;
-import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.fs.adl.AdlFileSystem;
@@ -546,7 +546,7 @@ public class FileSystemUtil {
   public static RemoteIterator<? extends FileStatus> listStatus(FileSystem fs, Path p,
       boolean recursive) throws IOException {
     try {
-      if (recursive) {
+      if (recursive && isS3AFileSystem(fs)) {
         // The Hadoop FileSystem API doesn't provide a recursive listStatus call that
         // doesn't also fetch block locations, and fetching block locations is expensive.
         // Here, our caller specifically doesn't need block locations, so we don't want to
@@ -563,14 +563,9 @@ public class FileSystemUtil {
         // which natively recurses. In that case, it's quite preferable to use 'listFiles'
         // even though it returns LocatedFileStatus objects with "fake" blocks which we
         // will ignore.
-        if (isS3AFileSystem(fs)) {
-          return listFiles(fs, p, recursive);
-        }
-
-        return new RecursingIterator(fs, p);
+        return listFiles(fs, p, true);
       }
-
-      return fs.listStatusIterator(p);
+      return new RemoteIteratorWithFilter(fs, p, recursive);
     } catch (FileNotFoundException e) {
       if (LOG.isWarnEnabled()) LOG.warn("Path does not exist: " + p.toString(), e);
       return null;
@@ -578,12 +573,23 @@ public class FileSystemUtil {
   }
 
   /**
+   * Predicate used to filter out hidden directories and temporary staging directories
+   * which tools like Hive create in the table/partition directories when a query is
+   * inserting data into them.
+   */
+  public static final Predicate <FileStatus> HIDDEN_DIRECTORIES_FILTER = fileStatus -> {
+    if (!fileStatus.isDirectory()) return false;
+    String filename = fileStatus.getPath().getName();
+    return filename.startsWith(".") || filename.startsWith("_tmp.");
+  };
+
+  /**
    * Wrapper around FileSystem.listFiles(), similar to the listStatus() wrapper above.
    */
-  public static RemoteIterator<LocatedFileStatus> listFiles(FileSystem fs, Path p,
+  public static RemoteIterator<? extends FileStatus> listFiles(FileSystem fs, Path p,
       boolean recursive) throws IOException {
     try {
-      return fs.listFiles(p, recursive);
+      return new RemoteIteratorWithFilter(fs, p, recursive, false);
     } catch (FileNotFoundException e) {
       if (LOG.isWarnEnabled()) LOG.warn("Path does not exist: " + p.toString(), e);
       return null;
@@ -612,18 +618,43 @@ public class FileSystemUtil {
   }
 
   /**
-   * Iterator which recursively visits directories on a FileSystem, yielding
-   * files in an unspecified order.
+   * Hadoop does not provide a RemoteIterator which takes a Filter to skip
+   * certain files/directories. This is a implementation of
+   * {@link org.apache.hadoop.fs.RemoteIterator}
+   * which can optionally recursively visit directories on a
+   * FileSystem. It uses a default filter which skips visiting hidden
+   * directories and certain tmp directories
+   * (See {@link org.apache.impala.common.FileSystemUtil#HIDDEN_DIRECTORIES_FILTER}
+   * for details). Note that files are listed in a unspecified order.
    */
-  static class RecursingIterator implements RemoteIterator<FileStatus> {
-    private final FileSystem fs_;
-    private final Stack<RemoteIterator<FileStatus>> iters_ = new Stack<>();
-    private RemoteIterator<FileStatus> curIter_;
-    private FileStatus curFile_;
+  private static class RemoteIteratorWithFilter implements RemoteIterator<FileStatus> {
 
-    RecursingIterator(FileSystem fs, Path startPath) throws IOException {
+    private final FileSystem fs_;
+    private final Stack <RemoteIterator <? extends  FileStatus>> iters_ = new Stack <>();
+    private RemoteIterator <? extends  FileStatus> curIter_;
+    private FileStatus curFile_;
+    private final boolean isRecursive_;
+
+    /**
+     * boolean flag used to use listStatus v/s listLocatedStatus API on the given
+     * FileSystem during iterating
+     */
+    private final boolean useListStatus_;
+
+    private RemoteIteratorWithFilter(FileSystem fs, Path startPath,
+        boolean isRecursive) throws IOException {
+      this(fs, startPath, isRecursive, true);
+    }
+
+    private RemoteIteratorWithFilter(FileSystem fs, Path startPath,
+        boolean isRecursive, boolean useListStatus)
+        throws IOException {
       this.fs_ = Preconditions.checkNotNull(fs);
-      curIter_ = fs.listStatusIterator(Preconditions.checkNotNull(startPath));
+      this.isRecursive_ = isRecursive;
+      this.useListStatus_ = useListStatus;
+      curIter_ = useListStatus ?
+          fs.listStatusIterator(Preconditions.checkNotNull(startPath)) :
+          fs.listLocatedStatus(Preconditions.checkNotNull(startPath));
     }
 
     @Override
@@ -648,10 +679,10 @@ public class FileSystemUtil {
     }
 
     /**
-     * Process the input stat.
-     * If it is a file, return the file stat.
-     * If it is a directory, traverse the directory if recursive is true;
-     * ignore it if recursive is false.
+     * Process the input stat. If it is a file, return the file stat. If it is a directory
+     * and if it is not filtered out recurses into it if the recursion is enabled.
+     * Also, uses listStatus or listLocatedStatus based the flag useListStatus_
+     *
      * @param fileStatus input status
      * @throws IOException if any IO error occurs
      */
@@ -660,8 +691,12 @@ public class FileSystemUtil {
         curFile_ = fileStatus;
         return;
       }
+      // do recurse if isRecursive is not set or if this a hidden directory
+      if (!isRecursive_ || HIDDEN_DIRECTORIES_FILTER.test(fileStatus)) return;
       iters_.push(curIter_);
-      curIter_ = fs_.listStatusIterator(fileStatus.getPath());
+      // use listStatusIterator or listLocatedStatus based on the flag
+      curIter_ = useListStatus_ ? fs_.listStatusIterator(fileStatus.getPath()) :
+          fs_.listLocatedStatus(fileStatus.getPath());
       curFile_ = fileStatus;
     }
 
