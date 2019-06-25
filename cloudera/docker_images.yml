@@ -1,0 +1,6 @@
+docker_images:
+    impala_base: impala_base
+    catalogd: catalogd
+    impalad_coord_exec: impalad_coord_exec
+    impalad_coordinator: impalad_coordinator
+    statestored: statestored
