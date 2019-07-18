@@ -5,6 +5,6 @@ docker_images:
     impalad_coordinator: impalad_coordinator
     statestored: statestored
 
-registry: docker-private.infra.cloudera.com/cdh/
+registry: __REGISTRY__
 docker_image_tag:
     build_tag: latest
