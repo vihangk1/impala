@@ -4,6 +4,7 @@ docker_images:
     impalad_coord_exec: impalad_coord_exec
     impalad_coordinator: impalad_coordinator
     statestored: statestored
+    impalad_executor: impalad_executor
 
 registry: __REGISTRY__
 docker_image_tag:
