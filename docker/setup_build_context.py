@@ -37,7 +37,21 @@ BINUTILS_HOME = os.path.join(
     IMPALA_TOOLCHAIN, "binutils-{0}".format(IMPALA_BINUTILS_VERSION))
 STRIP = os.path.join(BINUTILS_HOME, "bin/strip")
 KUDU_HOME = os.environ["IMPALA_KUDU_HOME"]
-KUDU_LIB_DIR = os.path.join(KUDU_HOME, "release/lib")
+KUDU_CLIENT_DIR = os.environ.get("KUDU_CLIENT_DIR")
+# Different distros put Kudu libraries in different places.
+# For now we ensure that we at least have the RHEL7 locations used in the CDP build.
+# An example of the locations of the .so files are as follows:
+# find -name *.so
+# ./kudu-1.9.0.7.0.0.0-294/build/release/client/usr/local/lib64/libkudu_client.so
+# ./kudu-1.9.0.7.0.0.0-294/build/release/lib/exported/libkudu_client.so
+# TODO: clean this up upstream to gracefully handle multiple distros
+if KUDU_CLIENT_DIR:
+  kudu_lib_dirs = [os.path.join(KUDU_CLIENT_DIR, "usr/local/lib"),
+                   os.path.join(KUDU_CLIENT_DIR, "usr/local/lib64")]
+else:
+  kudu_lib_dirs = [os.path.join(KUDU_HOME, "release/lib"),
+                   os.path.join(KUDU_HOME, "release/lib64"),
+                   os.path.join(KUDU_HOME, "release/lib/exported")]
 
 # Ensure the output directory exists and is empty.
 if os.path.exists(OUTPUT_DIR):
@@ -66,8 +80,14 @@ for lib in ["libstdc++", "libgcc"]:
   for so in glob.glob(os.path.join(GCC_HOME, "lib64/{0}*.so*".format(lib))):
     symlink_file_into_dir(so, LIB_DIR)
 
-for so in glob.glob(os.path.join(KUDU_LIB_DIR, "libkudu_client.so*")):
-  symlink_file_into_dir(so, LIB_DIR)
+found_kudu_so = False
+for kudu_lib_dir in kudu_lib_dirs:
+  for so in glob.glob(os.path.join(kudu_lib_dir, "libkudu_client.so*")):
+    found_kudu_so = True
+    symlink_file_into_dir(so, LIB_DIR)
+
+if not found_kudu_so:
+  raise Exception("No Kudu shared object found in search path: {0}".format(kudu_lib_dirs))
 
 # Impala dependencies.
 dep_classpath = file(os.path.join(IMPALA_HOME, "fe/target/build-classpath.txt")).read()

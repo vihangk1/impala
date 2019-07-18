@@ -15,17 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
-FROM ubuntu:16.04
+FROM docker-private.infra.cloudera.com/cloudera_base/cldr-java:8-jre-centos7
 
 # Install minimal dependencies required for Impala services to run.
 # liblzo2-2 may be needed by the Impala-lzo plugin, which is used in tests.
 # We install it in the base image for convenience.
-RUN apt-get update && \
-  apt-get install -y openjdk-8-jre-headless \
-  libsasl2-2 libsasl2-modules libsasl2-modules-gssapi-mit \
-  tzdata liblzo2-2 && \
-  apt-get clean && \
-  rm -rf /var/lib/apt/lists/*
+RUN yum install -y python-devel openldap-devel lzo cyrus-sasl-plain && \
+  yum clean all && \
+  rm -rf /var/cache/yum/*
 
 # Use a non-privileged impala user to run the daemons in the container.
 # That user should own everything in the /opt/impala subdirectory.
