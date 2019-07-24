@@ -87,8 +87,10 @@ class TestParquetInterop(CustomClusterTestSuite):
           .format(codec, hive_table, impala_table))
 
       # Make sure Impala's metadata is in sync.
-      if cluster_properties.is_catalog_v2_cluster():
-        self.wait_for_table_to_appear(unique_database, hive_table, timeout_s=10)
+      if cluster_properties.is_event_polling_enabled():
+        EventProcessorUtils.wait_for_event_processing(self.hive_client)
+        self.confirm_table_exists(unique_database, hive_table)
+        # self.wait_for_table_to_appear(unique_database, hive_table, timeout_s=10)
       else:
         self.client.execute("invalidate metadata {0}".format(hive_table))
 

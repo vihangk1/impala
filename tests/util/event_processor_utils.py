@@ -24,11 +24,9 @@ import time
 import json
 from tests.common.environ import build_flavor_timeout
 
-
 class EventProcessorUtils(object):
 
   DEFAULT_CATALOG_URL = "http://localhost:25020"
-
   @staticmethod
   def wait_for_event_processing(hive_client, timeout=10):
       """Waits till the event processor has synced to the latest event id from metastore

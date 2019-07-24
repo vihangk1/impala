@@ -37,6 +37,7 @@ from tests.common.test_dimensions import (
     create_single_exec_option_dimension,
     create_uncompressed_text_dimension)
 from tests.util.hive_utils import HiveDbWrapper, HiveTableWrapper
+from tests.util.event_processor_utils import EventProcessorUtils
 
 
 @SkipIfS3.hive
@@ -60,7 +61,6 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
   # Skip this test if catalogv2 is enabled since global invalidate is not
   # supported. #TODO This can be re-enabled when event polling is turned on
   @pytest.mark.execute_serially
-  @SkipIfCatalogV2.impala_7506()
   def test_sanity(self, vector, cluster_properties):
     """Verifies that creating a catalog entity (database, table) in Impala using
     'IF NOT EXISTS' while the entity exists in HMS, does not throw an error."""
@@ -68,9 +68,11 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.run_stmt_in_hive("drop database if exists hms_sanity_db cascade")
     self.run_stmt_in_hive("create database hms_sanity_db")
     # Make sure Impala's metadata is in sync.
-    if cluster_properties.is_catalog_v2_cluster():
-      # Using local catalog + HMS event processor - wait until the database shows up.
-      self.wait_for_db_to_appear("hms_sanity_db", timeout_s=30)
+    if cluster_properties.is_event_polling_enabled():
+      # Using HMS event processor - wait until latest event is processed
+      EventProcessorUtils.wait_for_event_processing(self.hive_client)
+      self.confirm_db_exists("hms_sanity_db")
+      # assert 'hms_sanity_db' in self.client.execute("show databases").data
     else:
       # Using traditional catalog - need to invalidate to pick up hive-created db.
       self.client.execute("invalidate metadata")
@@ -91,8 +93,8 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.client.execute("create table if not exists hms_sanity_db.test_tbl (a int)")
     # The table should not appear in the catalog for catalog_v1 unless invalidate
     # metadata is executed.
-    if cluster_properties.is_catalog_v2_cluster():
-      self.wait_for_table_to_appear("hms_sanity_db", "test_tbl", 10)
+    if cluster_properties.is_event_polling_enabled():
+      EventProcessorUtils.wait_for_event_processing(self.hive_client)
       assert 'test_tbl' in self.client.execute("show tables in hms_sanity_db").data
     else:
       assert 'test_tbl' not in self.client.execute("show tables in hms_sanity_db").data
