@@ -20,7 +20,7 @@ FROM docker-private.infra.cloudera.com/cloudera_base/cldr-java:8-jre-centos7
 # Install minimal dependencies required for Impala services to run.
 # liblzo2-2 may be needed by the Impala-lzo plugin, which is used in tests.
 # We install it in the base image for convenience.
-RUN yum install -y python-devel openldap-devel lzo cyrus-sasl-plain && \
+RUN yum install -y python-devel openldap-devel lzo cyrus-sasl-plain krb5-workstation && \
   yum clean all && \
   rm -rf /var/cache/yum/*
 
