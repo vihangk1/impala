@@ -55,4 +55,22 @@ if ! whoami ; then
   cat /etc/passwd
 fi
 
+# =========================== HACK FOR DWX =======================================
+# Currently only comms with HMS, Ranger and Atlas are kerberized. Impala only
+# maintains the kinit cache when kerberos is enabled across the board. That does
+# not work here because the internal connections will start failing (between
+# executor <-> coordinator or coordinator <-> statestore etc). This hack essentially
+# does the first time kinit with the supplied PRINCIPAL and KEYTAB and the subsequent
+# renewal is handled by UGI class from Hadoop *hopefully* (since all the Hadoop based
+# clients rely on UGI class and there is an auto renewal thread that maintains the tgt
+# cache for us)
+# This is a horrible hack and we need to figure out a way to have a tgt-renewer
+# as a sidecar to the daemons.
+if [ "${USE_KERBEROS}" == "true" ]; then
+  SERVICE_KEYTAB=${SERVICE_KEYTAB:?SERVICE_KEYTAB is required for kinit}
+  SERVICE_PRINCIPAL=${SERVICE_PRINCIPAL:?SERVICE_PRINCIPAL is required for kinit}
+  kinit -V -k -t ${SERVICE_KEYTAB} ${SERVICE_PRINCIPAL}
+  klist -e
+fi
+
 exec "$@"
