@@ -42,7 +42,7 @@ RUN cd /opt/impala/bin && ln -s impalad statestored && ln -s impalad catalogd &&
     mkdir /opt/impala/conf && \
 # Create logs directory to collect container logs.
     mkdir /opt/impala/logs && \
-# Create ranger cache directory that is used when ranger is enabled
+# Create ranger cache directory that is used when ranger is enabled.
     mkdir /opt/impala/rangercache
 
 WORKDIR /opt/impala/
