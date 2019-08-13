@@ -18,6 +18,7 @@
 package org.apache.impala.analysis;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -2645,6 +2646,16 @@ public class Analyzer {
     return table;
   }
 
+  public boolean tableExists(TableName tblName) {
+    Preconditions.checkNotNull(tblName);
+    return globalState_.stmtTableCache.tables.containsKey(tblName);
+  }
+
+  public boolean dbExists(String dbName) {
+    Preconditions.checkNotNull(dbName);
+    return globalState_.stmtTableCache.dbs.contains(dbName);
+  }
+
   /**
    * Returns the Table with the given name from the 'loadedTables' map in the global
    * analysis state. Throws an AnalysisException if the table or the db does not exist.
@@ -2664,17 +2675,19 @@ public class Analyzer {
     Preconditions.checkNotNull(tableName);
     Preconditions.checkNotNull(privilege);
     TableName fqTableName = getFqTableName(tableName);
-    for (Privilege priv : privilege) {
-      if (priv == Privilege.ANY || addColumnPrivilege) {
-        registerPrivReq(builder ->
-            builder.allOf(priv)
-                .onAnyColumn(fqTableName.getDb(), fqTableName.getTbl())
-                .build());
-      } else {
-        registerPrivReq(builder ->
-            builder.allOf(priv)
-                .onTable(fqTableName.getDb(), fqTableName.getTbl())
-                .build());
+    if (tableExists(fqTableName)) {
+      for (Privilege priv : privilege) {
+        if (priv == Privilege.ANY || addColumnPrivilege) {
+          registerPrivReq(builder ->
+              builder.allOf(priv)
+                  .onAnyColumn(fqTableName.getDb(), fqTableName.getTbl())
+                  .build());
+        } else {
+          registerPrivReq(builder ->
+              builder.allOf(priv)
+                  .onTable(fqTableName.getDb(), fqTableName.getTbl())
+                  .build());
+        }
       }
     }
     FeTable table = getTable(fqTableName.getDb(), fqTableName.getTbl());
@@ -2751,14 +2764,16 @@ public class Analyzer {
    */
   public FeDb getDb(String dbName, Privilege privilege, boolean throwIfDoesNotExist,
       boolean requireGrantOption) throws AnalysisException {
-    registerPrivReq(builder -> {
-      if (requireGrantOption) {
-        builder.grantOption();
-      }
-      return privilege == Privilege.ANY ?
-          builder.any().onAnyColumn(dbName).build() :
-          builder.allOf(privilege).onDb(dbName).build();
-    });
+    if (dbExists(dbName)) {
+      registerPrivReq(builder -> {
+        if (requireGrantOption) {
+          builder.grantOption();
+        }
+        return privilege == Privilege.ANY ?
+            builder.any().onAnyColumn(dbName).build() :
+            builder.allOf(privilege).onDb(dbName).build();
+      });
+    }
 
     FeDb db = getDb(dbName, throwIfDoesNotExist);
     globalState_.accessEvents.add(new TAccessEvent(

@@ -68,6 +68,14 @@ public class DropDbStmt extends StatementBase {
 
   @Override
   public void analyze(Analyzer analyzer) throws AnalysisException {
+    if (ifExists_ && !analyzer.dbExists(dbName_)) {
+      // if db does not exists and if exists clause is specified make sure the user has
+      // privilege to list database on this server so as to avoid unnecessary
+      // authorization exception on a database which does not exist
+      analyzer.registerPrivReq(builder -> builder.allOf(Privilege.ANY)
+          .onServer(analyzer.getServerName())
+          .build());
+    }
     FeDb db = analyzer.getDb(dbName_, Privilege.DROP, false);
     if (db == null && !ifExists_) {
       throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + dbName_);

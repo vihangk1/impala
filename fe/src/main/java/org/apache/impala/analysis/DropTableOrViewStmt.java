@@ -17,6 +17,7 @@
 
 package org.apache.impala.analysis;
 
+import java.util.Arrays;
 import java.util.List;
 
 import org.apache.impala.authorization.Privilege;
@@ -107,6 +108,16 @@ public class DropTableOrViewStmt extends StatementBase {
     // available in the toThrift() method.
     serverName_ = analyzer.getServerName();
     try {
+      // if the table does not exist and "if exists" clause is specified we should
+      // make sure that the user has privileges to list the tables on the database so
+      // that to avoid throwing a unnecessary authorization exception
+      if (ifExists_ && !analyzer.tableExists(tableName_)) {
+        analyzer.registerPrivReq(builder ->
+            builder.allOf(Privilege.ANY)
+                .onDb(dbName_)
+                .build());
+        return;
+      }
       FeTable table = analyzer.getTable(tableName_, /* add access event */ true,
           /* add column-level privilege */ false, Privilege.DROP);
       Preconditions.checkNotNull(table);
@@ -123,7 +134,6 @@ public class DropTableOrViewStmt extends StatementBase {
         analyzer.checkTableCapability(table, Analyzer.OperationType.WRITE);
         analyzer.ensureTableNotTransactional(table);
       }
-
     } catch (TableLoadingException e) {
       // We should still try to DROP tables that failed to load, so that tables that are
       // in a bad state, eg. deleted externally from Kudu, can be dropped.
@@ -135,8 +145,7 @@ public class DropTableOrViewStmt extends StatementBase {
           Privilege.DROP.toString()));
       LOG.info("Ignoring TableLoadingException for {}", tableName_);
     } catch (AnalysisException e) {
-      if (!ifExists_) throw e;
-      LOG.info("Ignoring AnalysisException for {}", tableName_);
+      throw e;
     }
   }
 

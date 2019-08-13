@@ -83,26 +83,40 @@ public class DropFunctionStmt extends StatementBase {
           false);
     }
 
-    analyzer.registerPrivReq(builder ->
-        builder.onFunction(desc_.dbName(), desc_.signatureString())
-            .allOf(Privilege.DROP)
-            .build());
+    boolean functionExists = true;
+    try {
+      FeDb db =  analyzer.getDb(desc_.dbName(), false);
+      if (db == null && !ifExists_) {
+        // db does not exist and if exists clause is not provided
+        throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + desc_.dbName());
+      }
+      if (!hasSignature() && db != null && db.getFunctions(
+          desc_.functionName()).isEmpty() && !ifExists_) {
+        functionExists = false;
+        throw new AnalysisException(
+            Analyzer.FN_DOES_NOT_EXIST_ERROR_MSG + desc_.functionName());
+      }
 
-    FeDb db =  analyzer.getDb(desc_.dbName(), false);
-    if (db == null && !ifExists_) {
-      throw new AnalysisException(Analyzer.DB_DOES_NOT_EXIST_ERROR_MSG + desc_.dbName());
-    }
-
-    if (!hasSignature() && db != null && db.getFunctions(
-        desc_.functionName()).isEmpty() && !ifExists_) {
-      throw new AnalysisException(
-          Analyzer.FN_DOES_NOT_EXIST_ERROR_MSG + desc_.functionName());
-    }
-
-    if (hasSignature() && analyzer.getCatalog().getFunction(
-        desc_, Function.CompareMode.IS_IDENTICAL) == null && !ifExists_) {
-      throw new AnalysisException(
-          Analyzer.FN_DOES_NOT_EXIST_ERROR_MSG + desc_.signatureString());
+      if (hasSignature() && analyzer.getCatalog().getFunction(
+          desc_, Function.CompareMode.IS_IDENTICAL) == null && !ifExists_) {
+        functionExists = false;
+        throw new AnalysisException(
+            Analyzer.FN_DOES_NOT_EXIST_ERROR_MSG + desc_.signatureString());
+      }
+    } finally {
+      if (!functionExists && ifExists_) {
+        // function does not exists and if exists clause if provided
+        // we check if the user have privilege to list the functions at the database so
+        // as to avoid throwing authorization exception unnecessarily
+        analyzer.registerPrivReq(
+            builder -> builder.onDb(desc_.dbName()).allOf(Privilege.VIEW_METADATA)
+                .build());
+      } else {
+        analyzer.registerPrivReq(builder ->
+            builder.onFunction(desc_.dbName(), desc_.signatureString())
+                .allOf(Privilege.DROP)
+                .build());
+      }
     }
   }
 }
