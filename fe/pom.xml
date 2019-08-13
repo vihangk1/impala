@@ -636,7 +636,7 @@ under the License.
                   </includes>
                 </bannedDependencies>
               </rules>
-              <fail>true</fail>
+              <fail>false</fail>
             </configuration>
           </execution>
         </executions>
