@@ -182,19 +182,29 @@ class TestOwnerPrivileges(SentryCacheTestSuite):
 
   def _execute_drop_if_exists(self, test_obj):
     """
-    Executes a drop table if exists on a dropped table and makes sure that
-    there is no authorization exception
+    Executes a drop table if exists on a given object type and makes sure that
+    there is no authorization exception when the user has enough privileges. If the user
+    does not have correct privileges the test confirms that error is thrown
     """
     self.oo_user1_impalad_client = self.create_impala_client()
+    self.oo_user2_impalad_client = self.create_impala_client()
     self.user_query(self.oo_user1_impalad_client, "create %s %s %s %s %s" %
                     (test_obj.obj_type, test_obj.obj_name, test_obj.table_def,
                      test_obj.view_select, test_obj.func_def), user="oo_user1")
+    self.user_query(self.oo_user2_impalad_client, "drop %s %s" %
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user2",
+                    error_msg="does not have privileges to execute 'DROP'")
     self.user_query(self.oo_user1_impalad_client, "drop %s %s" %
                     (test_obj.obj_type, test_obj.obj_name,), user="oo_user1")
     # a drop if exists on a non-existing object should not error out if the user has
     # minimum set of privileges required to list those object types
     self.user_query(self.oo_user1_impalad_client, "drop %s if exists %s" %
                     (test_obj.obj_type, test_obj.obj_name), user="oo_user1")
+    # oo_user2 does not have privileges on this object and hence should receive a
+    # authorization error
+    self.user_query(self.oo_user2_impalad_client, "drop %s if exists %s" %
+                    (test_obj.obj_type, test_obj.obj_name), user="oo_user2",
+                    error_msg="does not have privileges to execute 'DROP'")
 
   @pytest.mark.execute_serially
   @SentryCacheTestSuite.with_args(
