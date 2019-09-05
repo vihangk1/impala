@@ -22,3 +22,6 @@
 
 # Use CDPD Hive
 export USE_CDP_HIVE=true
+
+# CDP ATLAS URL
+export CDP_ATLAS_REPO=https://native-toolchain.s3.amazonaws.com/build/cdp_components/$CDP_ATLAS_BUILD_NUMBER/tarballs/apache-atlas-$CDP_ATLAS_VERSION-impala-hook.tar.gz

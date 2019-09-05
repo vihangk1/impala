@@ -25,6 +25,8 @@ import glob
 import os
 import shutil
 from subprocess import check_call
+from urllib2 import urlopen
+import tempfile
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--debug-build", help="Setup build context for debug build",
@@ -81,6 +83,11 @@ def symlink_file_into_dir(src_file, dst_dir):
   """Helper to symlink 'src_file' into 'dst_dir'."""
   os.symlink(src_file, os.path.join(dst_dir, os.path.basename(src_file)))
 
+def download_atlas_tarball(url, destination_dir):
+  """ Helper to download Atlas tarball from a given url."""
+  f = urlopen(url)
+  with open(os.path.join(destination_dir, "impala-atlas.tar.gz"), "wb") as rpm_file:
+    rpm_file.write(f.read())
 
 # Impala binaries and native dependencies.
 
@@ -114,6 +121,31 @@ for jar in dep_classpath.split(":"):
 # Impala jars.
 for jar in glob.glob(os.path.join(IMPALA_HOME, "fe/target/impala-frontend-*.jar")):
   symlink_file_into_dir(jar, LIB_DIR)
+
+# Download and extract Atlas JARS and copy to LIB_DIR.
+ATLAS_TMP_DIR = tempfile.mkdtemp()
+# Create a directory for atlas plugin implementation jars.
+ATLAS_IMPALA_IMPL_DIR = os.path.join(LIB_DIR, "atlas-impala-plugin-impl")
+os.mkdir(ATLAS_IMPALA_IMPL_DIR)
+try:
+  download_atlas_tarball(os.environ["CDP_ATLAS_REPO"], ATLAS_TMP_DIR)
+  # Extract tar to get the JARs
+  CMD = "tar -xf {0}/impala-atlas.tar.gz -C {0}".format(ATLAS_TMP_DIR)
+  os.system(CMD)
+  bridge_jars = glob.glob("{0}/apache-atlas-*/hook/impala/*.jar".format(ATLAS_TMP_DIR))
+  assert len(bridge_jars) > 0, "No Atlas jars found in /hook/impala/ directory."
+  for jar in bridge_jars:
+    shutil.copy(jar, LIB_DIR)
+  impl_jars = glob.glob("{0}/apache-atlas-*/hook/impala/atlas-impala-plugin-impl/*.jar".
+      format(ATLAS_TMP_DIR))
+  assert len(impl_jars) > 0, "No Atlas jars found in hook/impala/" \
+    "atlas-impala-plugin-impl directory."
+  for jar in impl_jars:
+    shutil.copy(jar, ATLAS_IMPALA_IMPL_DIR)
+except Exception as e:
+  raise Exception("Unable to download Atlas jars: {0}".format(e.message))
+finally:
+  shutil.rmtree(ATLAS_TMP_DIR)
 
 # Templates for debug web pages.
 os.symlink(os.path.join(IMPALA_HOME, "www"), os.path.join(OUTPUT_DIR, "www"))

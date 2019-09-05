@@ -40,6 +40,10 @@ for jar in /opt/impala/lib/*.jar
 do
   CLASSPATH+=:$jar
 done
+# Add atlas plugin implementation jars to the classpath. Atlas has
+# its own class loader and expects the atlas-impala-plugin-impl
+# directory by itself without any wildcards or individual jars listed.
+CLASSPATH+=:/opt/impala/lib/atlas-impala-plugin-impl
 echo "CLASSPATH: $CLASSPATH"
 echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
 
