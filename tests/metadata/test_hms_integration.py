@@ -37,6 +37,7 @@ from tests.common.test_dimensions import (
     create_single_exec_option_dimension,
     create_uncompressed_text_dimension)
 from tests.util.hive_utils import HiveDbWrapper, HiveTableWrapper
+from tests.util.event_processor_utils import EventProcessorUtils
 
 
 @SkipIfS3.hive
@@ -65,8 +66,15 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.run_stmt_in_hive("drop database if exists hms_sanity_db cascade")
     self.run_stmt_in_hive("create database hms_sanity_db")
     # Make sure Impala's metadata is in sync.
-    # Invalidate metadata to pick up hive-created db.
-    self.client.execute("invalidate metadata")
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status == "ACTIVE"
+      # Using HMS event processor - wait until latest event is processed
+      EventProcessorUtils.wait_for_event_processing(self.hive_client)
+      self.confirm_db_exists("hms_sanity_db")
+      # assert 'hms_sanity_db' in self.client.execute("show databases").data
+    else:
+      # Using traditional catalog - need to invalidate to pick up hive-created db.
+      self.client.execute("invalidate metadata")
     # Creating a database with the same name using 'IF NOT EXISTS' in Impala should
     # not fail
     self.client.execute("create database if not exists hms_sanity_db")
@@ -84,7 +92,12 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.client.execute("create table if not exists hms_sanity_db.test_tbl (a int)")
     # The table should not appear in the catalog *immediately* unless invalidate
     # metadata is executed.
-    assert 'test_tbl' not in self.client.execute("show tables in hms_sanity_db").data
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status == "ACTIVE"
+      EventProcessorUtils.wait_for_event_processing(self.hive_client)
+      assert 'test_tbl' in self.client.execute("show tables in hms_sanity_db").data
+    else:
+      assert 'test_tbl' not in self.client.execute("show tables in hms_sanity_db").data
     self.client.execute("invalidate metadata hms_sanity_db.test_tbl")
     assert 'test_tbl' in self.client.execute("show tables in hms_sanity_db").data
 

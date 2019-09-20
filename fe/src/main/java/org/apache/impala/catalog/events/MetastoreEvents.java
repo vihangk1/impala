@@ -673,29 +673,19 @@ public class MetastoreEvents {
      * will create it. If the table in the catalog already exists, it relies of the
      * creationTime of the Metastore Table to resolve the conflict. If the catalog table's
      * creation time is less than creationTime of the table from the event, it will be
-     * overridden. Else, it will ignore the event
+     * overridden. Else, it will ignore the event. If the database does not exist
+     * anymore, the event is ignored.
      */
     @Override
-    public void process() throws MetastoreNotificationException {
+    public void process() {
       // check if the table exists already. This could happen in corner cases of the
       // table being dropped and recreated with the same name or in case this event is
       // a self-event (see description of self-event in the class documentation of
       // MetastoreEventsProcessor)
-      try {
-        if (!catalog_.addTableIfNotExists(dbName_, tblName_)) {
-          debugLog(
-              "Not adding the table {} since it already exists in catalog", tblName_);
-          return;
-        }
-      } catch (CatalogException e) {
-        // if a exception is thrown, it could be due to the fact that the db did not
-        // exist in the catalog cache. This could only happen if the previous
-        // create_database event for this table errored out
-        throw new MetastoreNotificationException(debugString(
-            "Unable to add table while processing for table %s because the "
-                + "database doesn't exist. This could be due to a previous error while "
-                + "processing CREATE_DATABASE event for the database %s",
-            getFullyQualifiedTblName(), dbName_), e);
+      if (!catalog_.addTableIfNotExists(dbName_, tblName_)) {
+        debugLog("Not adding the table {}.{} since it already exists in catalog or the db"
+             + " does not exist anymore.", dbName_, tblName_);
+        return;
       }
       debugLog("Added a table {}", getFullyQualifiedTblName());
     }
@@ -1185,7 +1175,7 @@ public class MetastoreEvents {
      * the Db object from the event
      */
     @Override
-    public void process() throws CatalogException, MetastoreNotificationException {
+    public void process() throws CatalogException {
       if (isSelfEvent()) {
         infoLog("Not processing the event as it is a self-event");
         return;

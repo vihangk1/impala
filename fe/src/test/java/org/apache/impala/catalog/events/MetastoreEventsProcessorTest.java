@@ -613,6 +613,17 @@ public class MetastoreEventsProcessorTest {
     assertTrue("Newly created table should be instance of IncompleteTable",
         catalog_.getTable(TEST_DB_NAME, testPartitionedTbl)
                 instanceof IncompleteTable);
+
+    // Test create table on a drop database event.
+    dropDatabaseCascadeFromImpala(TEST_DB_NAME);
+    assertNull("Database not expected to exist.", catalog_.getDb(TEST_DB_NAME));
+    createDatabaseFromImpala(TEST_DB_NAME, null);
+    eventsProcessor_.processEvents();
+    createTable("createondroppeddb", false);
+    catalog_.removeDb(TEST_DB_NAME);
+    eventsProcessor_.processEvents();
+    assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
+
   }
 
   /**
