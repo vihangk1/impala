@@ -39,6 +39,7 @@ export IMPALA_HOME=$(pwd)
 export SOURCE_ROOT="${IMPALA_HOME}/.."
 export DOWNLOAD_CDH_COMPONENTS=false
 export PYPI_MIRROR='https://pypi.infra.cloudera.com/api/pypi/pypi-public'
+export IS_STANDALONE_IMPALA_BUILD=false
 
 # unpack_into_directory TARBALL OUTPUT_DIR
 # Unpacks TARBALL, stripping the top level directory and outputting to OUTPUT_DIR
