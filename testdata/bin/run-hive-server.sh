@@ -98,6 +98,11 @@ if ${USE_CDP_HIVE} ; then
   done
 fi
 
+# Downstream specific code:
+# For Hive 3, sometimes the tarball contains an extra hive-exec-*-core-shaded.jar.
+# This interferes with the ordinary hive-exec-*.jar. We don't need it, so remove it.
+rm -f ${HIVE_HOME}/lib/hive-exec-*-core-shaded.jar
+
 # Add kudu-hive.jar to the Hive Metastore classpath, so that Kudu's HMS
 # plugin can be loaded.
 for file in ${IMPALA_KUDU_JAVA_HOME}/*kudu-hive*jar; do
