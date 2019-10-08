@@ -26,6 +26,7 @@ import java.util.Set;
 
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.impala.analysis.ColumnDef;
@@ -117,6 +118,27 @@ public class KuduTable extends Table implements FeKuduTable {
     super(msTable, db, name, owner);
     kuduTableName_ = msTable.getParameters().get(KuduTable.KEY_TABLE_NAME);
     kuduMasters_ = msTable.getParameters().get(KuduTable.KEY_MASTER_HOSTS);
+  }
+
+  /**
+   * Returns if this Kudu table is externally managed. This is more than just checking if
+   * the table is managed or external. Starting Hive 3.1 HMS transforms a table from
+   * managed to external if the user is trying to create a non-transactional managed
+   * table. Such tables have an additional property <code>TRANSLATED_TO_EXTERNAL</code>
+   * set to true. From the perspective of Impala, if a Kudu table has
+   * <code>TRANSLATED_TO_EXTERNAL</code> set to true, it should treat it as a managed
+   * table so the user facing behavior is not changed when compared to previous
+   * versions of HMS
+   */
+  public static boolean isExternallyManagedTable(
+      org.apache.hadoop.hive.metastore.api.Table msTbl) {
+    Preconditions.checkState(isKuduTable(msTbl));
+    // HIVE-19253: table property can also indicate an external table.
+    // See org.apache.hadoop.hive.metastore.utils.MetaStoreUtils.isExternalTable().
+    return (msTbl.getTableType().equalsIgnoreCase(TableType.EXTERNAL_TABLE.toString()) ||
+        ("TRUE").equalsIgnoreCase(msTbl.getParameters().get(TBL_PROP_EXTERNAL_TABLE)))
+        && !Boolean
+        .parseBoolean(msTbl.getParameters().get(TBL_PROP_TRANSLATED_TO_EXTERNAL));
   }
 
   @Override

@@ -1616,7 +1616,7 @@ public class CatalogOpExecutor {
       }
     }
     for (org.apache.hadoop.hive.metastore.api.Table msTable: msTables) {
-      if (!KuduTable.isKuduTable(msTable) || Table.isExternalTable(msTable)) continue;
+      if (!KuduTable.isKuduTable(msTable) || KuduTable.isExternallyManagedTable(msTable)) continue;
       // The operation will be aborted if the Kudu table cannot be dropped. If for
       // some reason Kudu is permanently stuck in a non-functional state, the user is
       // expected to ALTER TABLE to either set the table to UNMANAGED or set the format
@@ -1730,7 +1730,7 @@ public class CatalogOpExecutor {
         }
       }
       boolean isManagedKuduTable = msTbl != null &&
-              KuduTable.isKuduTable(msTbl) && !Table.isExternalTable(msTbl);
+              KuduTable.isKuduTable(msTbl) && !KuduTable.isExternallyManagedTable(msTbl);
       if (isManagedKuduTable) {
         KuduCatalogOpExecutor.dropTable(msTbl, /* if exists */ true);
       }
@@ -2178,14 +2178,14 @@ public class CatalogOpExecutor {
   private boolean createKuduTable(org.apache.hadoop.hive.metastore.api.Table newTable,
       TCreateTableParams params, TDdlExecResponse response) throws ImpalaException {
     Preconditions.checkState(KuduTable.isKuduTable(newTable));
-    if (Table.isExternalTable(newTable)) {
+    if (KuduTable.isExternallyManagedTable(newTable)) {
       KuduCatalogOpExecutor.populateExternalTableColsFromKudu(newTable);
     } else {
       KuduCatalogOpExecutor.createManagedTable(newTable, params);
     }
     // When Kudu's integration with the Hive Metastore is enabled, Kudu will create
     // the HMS table for managed tables.
-    boolean createsHMSTable = Table.isExternalTable(newTable) ?
+    boolean createsHMSTable = KuduTable.isExternallyManagedTable(newTable) ?
         true : !isKuduHmsIntegrationEnabled(newTable);
     try {
       // Add the table to the HMS and the catalog cache. Acquire metastoreDdlLock_ to
@@ -2203,7 +2203,7 @@ public class CatalogOpExecutor {
     } catch (Exception e) {
       try {
         // Error creating the table in HMS, drop the managed table from Kudu.
-        if (!Table.isExternalTable(newTable)) {
+        if (!KuduTable.isExternallyManagedTable(newTable)) {
           KuduCatalogOpExecutor.dropTable(newTable, false);
         }
       } catch (Exception logged) {
@@ -2866,7 +2866,7 @@ public class CatalogOpExecutor {
 
     // If oldTbl is a managed Kudu table, rename the underlying Kudu table.
     boolean isManagedKuduTable = (oldTbl instanceof KuduTable) &&
-                                 !Table.isExternalTable(msTbl);
+                                 !KuduTable.isExternallyManagedTable(msTbl);
     boolean altersHMSTable = true;
     if (isManagedKuduTable) {
       Preconditions.checkState(KuduTable.isKuduTable(msTbl));
@@ -3094,7 +3094,7 @@ public class CatalogOpExecutor {
             if (properties.containsKey(KuduTable.KEY_TABLE_NAME)
                 && !properties.get(KuduTable.KEY_TABLE_NAME).equals(
                     msTbl.getParameters().get(KuduTable.KEY_TABLE_NAME))
-                && !Table.isExternalTable(msTbl)) {
+                && !KuduTable.isExternallyManagedTable(msTbl)) {
               KuduCatalogOpExecutor.renameTable((KuduTable) tbl,
                   properties.get(KuduTable.KEY_TABLE_NAME));
             }
