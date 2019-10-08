@@ -25,14 +25,11 @@ import org.apache.avro.SchemaParseException;
 import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.avro.AvroSerdeUtils;
 import org.apache.impala.authorization.AuthorizationConfig;
-import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.FeFsTable;
 import org.apache.impala.catalog.FeHBaseTable;
 import org.apache.impala.catalog.FeKuduTable;
 import org.apache.impala.catalog.FeTable;
-import org.apache.impala.catalog.HdfsTable;
 import org.apache.impala.catalog.KuduTable;
-import org.apache.impala.catalog.Table;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.thrift.TAlterTableParams;
@@ -117,10 +114,9 @@ public class AlterTableSetTblProperties extends AlterTableSetStmt {
   }
 
   private void analyzeKuduTable(Analyzer analyzer) throws AnalysisException {
-    // Throw error if kudu.table_name is provided for managed Kudu tables.
-    // TODO IMPALA-6375: Allow setting kudu.table_name for managed Kudu tables
-    // if the 'EXTERNAL' property is set to TRUE in the same step.
-    if (!Table.isExternalTable(table_.getMetaStoreTable())) {
+    // Throw error if kudu.table_name is provided for synchronized Kudu tables.
+    // TODO IMPALA-6375: Allow setting kudu.table_name for synchronized Kudu tables
+    if (KuduTable.isSynchronizedTable(table_.getMetaStoreTable())) {
       AnalysisUtils.throwIfNotNull(tblProperties_.get(KuduTable.KEY_TABLE_NAME),
           String.format("Not allowed to set '%s' manually for managed Kudu tables .",
               KuduTable.KEY_TABLE_NAME));
