@@ -98,6 +98,8 @@ if ${USE_CDP_HIVE} ; then
   done
 fi
 
+rm -f ${HIVE_HOME}/lib/hive-exec-*-core-shaded.jar
+
 # Add kudu-hive.jar to the Hive Metastore classpath, so that Kudu's HMS
 # plugin can be loaded.
 for file in ${IMPALA_KUDU_JAVA_HOME}/*kudu-hive*jar; do
