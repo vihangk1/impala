@@ -73,6 +73,9 @@ fi
 # The runtime for this build is highly impacted by ccache, so dump various information
 # about ccache (version, config) and disk usage to give an idea of the effectiveness
 # of ccache.
+# A run with a very large ccache ended using about 11GB in the cache, so set the ccache
+# to 15GB to give some headroom.
+ccache --max-size=15G || true
 ccache --version || true
 ccache -p || true
 df || true
