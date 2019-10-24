@@ -114,6 +114,7 @@ export CDP_MAVEN_REPOSITORY="${BUILD_REPO}/cdh/7.x/maven-repository/"
 # Download it and store it in a known location (if it is not already downloaded).
 CDP_PROPERTIES_FILE="${IMPALA_HOME}/toolchain/cdp_components/cdp.properties.${CDP_GBN}"
 if [ ! -f "${CDP_PROPERTIES_FILE}" ]; then
+    mkdir -p "$(dirname ${CDP_PROPERTIES_FILE})"
     $WGET "${BUILD_REPO}"/cdh-root.properties -O "${CDP_PROPERTIES_FILE}"
 fi
 
