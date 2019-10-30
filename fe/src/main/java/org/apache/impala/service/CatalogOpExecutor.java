@@ -2182,14 +2182,14 @@ public class CatalogOpExecutor {
   private boolean createKuduTable(org.apache.hadoop.hive.metastore.api.Table newTable,
       TCreateTableParams params, TDdlExecResponse response) throws ImpalaException {
     Preconditions.checkState(KuduTable.isKuduTable(newTable));
-    if (KuduTable.isExternalTable(newTable)) {
+    if (Table.isExternalTable(newTable)) {
       KuduCatalogOpExecutor.populateExternalTableColsFromKudu(newTable);
     } else {
       KuduCatalogOpExecutor.createManagedTable(newTable, params);
     }
     // When Kudu's integration with the Hive Metastore is enabled, Kudu will create
     // the HMS table for managed tables.
-    boolean createsHMSTable = KuduTable.isExternalTable(newTable) ?
+    boolean createsHMSTable = Table.isExternalTable(newTable) ?
         true : !isKuduHmsIntegrationEnabled(newTable);
     try {
       // Add the table to the HMS and the catalog cache. Acquire metastoreDdlLock_ to
@@ -2207,7 +2207,7 @@ public class CatalogOpExecutor {
     } catch (Exception e) {
       try {
         // Error creating the table in HMS, drop the managed table from Kudu.
-        if (!KuduTable.isExternalTable(newTable)) {
+        if (!Table.isExternalTable(newTable)) {
           KuduCatalogOpExecutor.dropTable(newTable, false);
         }
       } catch (Exception logged) {
