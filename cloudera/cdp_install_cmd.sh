@@ -113,6 +113,14 @@ export HADOOP_LIB_DIR_OVERRIDE="${SOURCE_ROOT}/hadoop/lib"
 echo "### Building Impala ###"
 ccache -s || true
 ccache -z || true
+# Hack: Impala builds have seen g++ getting killed due to running out of memory. As a
+# temporary workaround, reduce parallelism to 3/4 normal. The machines are running
+# in a Kubernetes pod with a CPU limit below the number of CPUs, so this may not
+# impact build time. Kudu compilation isn't seeing this, so restrict this to Impala
+# for now.
+IMPALA_BUILD_THREADS=$(($(nproc) * 3 / 4))
+echo "Set IMPALA_BUILD_THREADS to ${IMPALA_BUILD_THREADS}"
+
 # Log ccache accesses to help diagnose bad cache hit rates
 # (Needs to be an absolute path, because ccache is invoked in many different directories)
 export CCACHE_LOGFILE="${IMPALA_HOME}/ccache-log-impala-build.txt"
