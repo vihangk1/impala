@@ -143,6 +143,9 @@ fi
 # enable ccache logging
 # ccache itself was enabled in init-compiler by path manipulations
 export CCACHE_LOGFILE=${KUDU_HOME}/ccache-log-kudu-for-impala.txt
+# Set CCACHE_BASEDIR to allow cache hits regardless the build directory. Get the actual
+# KUDU_HOME path (without any /../'s).
+export CCACHE_BASEDIR="$(cd ${KUDU_HOME} && pwd)"
 
 ccache --version || true # Dump version, never fail
 ccache -s || true   # Dump statistics, never fail.

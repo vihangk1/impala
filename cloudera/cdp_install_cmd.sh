@@ -124,6 +124,9 @@ echo "Set IMPALA_BUILD_THREADS to ${IMPALA_BUILD_THREADS}"
 # Log ccache accesses to help diagnose bad cache hit rates
 # (Needs to be an absolute path, because ccache is invoked in many different directories)
 export CCACHE_LOGFILE="${IMPALA_HOME}/ccache-log-impala-build.txt"
+# Set CCACHE_BASEDIR to allow cache hits regardless the build directory. Get the actual
+# IMPALA_HOME path (without any /../'s).
+export CCACHE_BASEDIR="$(cd ${IMPALA_HOME} && pwd)"
 time ./buildall.sh -noclean -notests -release_and_debug
 ccache -s || true
 df || true
