@@ -23,6 +23,7 @@ from tests.common.impala_test_suite import ImpalaTestSuite
 from tests.common.skip import SkipIf, SkipIfHive3
 from tests.common.test_dimensions import create_uncompressed_text_dimension
 from tests.util.test_file_parser import QueryTestSectionReader, remove_comments
+from tests.common.environ import HIVE_MAJOR_VERSION
 
 
 # The purpose of the show create table tests are to ensure that the "SHOW CREATE TABLE"
@@ -30,13 +31,15 @@ from tests.util.test_file_parser import QueryTestSectionReader, remove_comments
 # definition. The table is created, then the output of "SHOW CREATE TABLE" is used to
 # test if the table can be recreated. This test class does not support --update-results.
 class TestShowCreateTable(ImpalaTestSuite):
-  VALID_SECTION_NAMES = ["CREATE_TABLE", "CREATE_VIEW", "QUERY", "RESULTS"]
+  VALID_SECTION_NAMES = ["CREATE_TABLE", "CREATE_VIEW", "QUERY", "RESULTS-HIVE-2",
+                         "RESULTS-HIVE-3"]
   # Properties to filter before comparing results
   FILTER_TBL_PROPERTIES = ["transient_lastDdlTime", "numFiles", "numPartitions",
                            "numRows", "rawDataSize", "totalSize", "COLUMN_STATS_ACCURATE",
                            "STATS_GENERATED_VIA_STATS_TASK", "last_modified_by",
                            "last_modified_time", "numFilesErasureCoded",
-                           "bucketing_version", "OBJCAPABILITIES"]
+                           "bucketing_version", "OBJCAPABILITIES",
+                           "TRANSLATED_TO_EXTERNAL"]
 
   @classmethod
   def get_workload(self):
@@ -209,7 +212,13 @@ class ShowCreateTableTestCase(object):
       assert 0, 'Error in test file %s. Test cases require a '\
           'CREATE_TABLE section.\n%s' %\
           (test_file_name, pprint.pformat(test_section))
-    expected_result = remove_comments(test_section['RESULTS'])
+    assert HIVE_MAJOR_VERSION in (2, 3)
+    if HIVE_MAJOR_VERSION == 2:
+      print "Detected HIVE major version as 2"
+      expected_result = remove_comments(test_section['RESULTS-HIVE-2'])
+    else:
+      print "Detected HIVE major version as 3"
+      expected_result = remove_comments(test_section['RESULTS-HIVE-3'])
     self.expected_result = expected_result.replace(
         ShowCreateTableTestCase.RESULTS_DB_NAME_TOKEN, test_db_name)
 

@@ -72,7 +72,7 @@ public class ToSqlUtils {
   @VisibleForTesting
   protected static final ImmutableSet<String> HIDDEN_TABLE_PROPERTIES = ImmutableSet.of(
       "EXTERNAL", "comment", AlterTableSortByStmt.TBL_PROP_SORT_COLUMNS,
-      AlterTableSortByStmt.TBL_PROP_SORT_ORDER);
+      AlterTableSortByStmt.TBL_PROP_SORT_ORDER, "TRANSLATED_TO_EXTERNAL");
 
   /**
    * Removes all hidden properties from the given 'tblProperties' map.
@@ -311,8 +311,8 @@ public class ToSqlUtils {
     if (properties.containsKey(Table.TBL_PROP_LAST_DDL_TIME)) {
       properties.remove(Table.TBL_PROP_LAST_DDL_TIME);
     }
-    boolean isExternal = msTable.getTableType() != null &&
-        msTable.getTableType().equals(TableType.EXTERNAL_TABLE.toString());
+    boolean isExternal = Table.isExternalTable(msTable);
+
     List<String> sortColsSql = getSortColumns(properties);
     TSortingOrder sortingOrder = TSortingOrder.valueOf(getSortingOrder(properties));
     String comment = properties.get("comment");
