@@ -143,9 +143,17 @@ fi
 # enable ccache logging
 # ccache itself was enabled in init-compiler by path manipulations
 export CCACHE_LOGFILE=${KUDU_HOME}/ccache-log-kudu-for-impala.txt
-# Set CCACHE_BASEDIR to allow cache hits regardless the build directory. Get the actual
-# KUDU_HOME path (without any /../'s).
+# The CDP build can run in different directories for different Jenkins jobs. To share
+# the ccache between them, the directory name needs to be excluded from the ccache hash.
+# There are two options needed to do that:
+# 1. CCACHE_BASEDIR corrects absolute paths in the compilation commands.
+#    (Use the actual IMPALA_HOME path without any /../'s)
+# 2. CCACHE_NOHASHDIR tells ccache not to hash the directory name.
+# The implication of ignoring the directory is that the wrong directory name can be
+# embedded in the binary (e.g. in the debug info). This should be harmless, since the
+# tools that use it (gdb) have ways of overriding it.
 export CCACHE_BASEDIR="$(cd ${KUDU_HOME} && pwd)"
+export CCACHE_NOHASHDIR="true"
 
 ccache --version || true # Dump version, never fail
 ccache -s || true   # Dump statistics, never fail.
