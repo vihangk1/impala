@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.impala.catalog.FeKuduTable;
 import org.apache.impala.catalog.KuduColumn;
@@ -71,9 +72,9 @@ public class KuduCatalogOpExecutor {
    * Throws an exception if 'msTbl' represents an external table or if the table couldn't
    * be created in Kudu.
    */
-  static void createManagedTable(org.apache.hadoop.hive.metastore.api.Table msTbl,
+  static void createSynchronizedTable(org.apache.hadoop.hive.metastore.api.Table msTbl,
       TCreateTableParams params) throws ImpalaRuntimeException {
-    Preconditions.checkState(!Table.isExternalTable(msTbl));
+    Preconditions.checkState(KuduTable.isSynchronizedTable(msTbl));
     Preconditions.checkState(
         msTbl.getParameters().get(KuduTable.KEY_TABLE_ID) == null);
     String kuduTableName = msTbl.getParameters().get(KuduTable.KEY_TABLE_NAME);
@@ -86,6 +87,9 @@ public class KuduCatalogOpExecutor {
     try {
       // TODO: The IF NOT EXISTS case should be handled by Kudu to ensure atomicity.
       // (see KUDU-1710).
+      if (KuduTable.isExternalPurgeTable(msTbl) && !StringUtils.isEmpty(kuduTableName)) {
+        // we expect that if external.purge.table is set to true in tblproperties
+      }
       if (kudu.tableExists(kuduTableName)) {
         if (params.if_not_exists) return;
         throw new ImpalaRuntimeException(String.format(

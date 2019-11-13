@@ -2207,6 +2207,9 @@ public class CatalogOpExecutor {
    *     table is first created in Kudu, then in the HMS.
    *  2. Otherwise, when the table is created in Kudu, we rely on Kudu to have
    *     created the table in the HMS.
+   * For external purge tables:
+   *  1. This is similar to managed tables above, except we skip Kudu table creation if
+   *  it already exists. If the Kudu table is not present, we will create it.
    * For external tables:
    *  1. We only create the table in the HMS (regardless of Kudu's integration
    *     with the Hive Metastore).
@@ -2219,20 +2222,26 @@ public class CatalogOpExecutor {
   private boolean createKuduTable(org.apache.hadoop.hive.metastore.api.Table newTable,
       TCreateTableParams params, TDdlExecResponse response) throws ImpalaException {
     Preconditions.checkState(KuduTable.isKuduTable(newTable));
-    if (Table.isExternalTable(newTable)) {
+    if (!KuduTable.isSynchronizedTable(newTable)) {
+      // if this is not a synchronized table, we assume that the table must be existing
+      // in kudu and use the column spec from Kudu
       KuduCatalogOpExecutor.populateExternalTableColsFromKudu(newTable);
     } else {
-      KuduCatalogOpExecutor.createManagedTable(newTable, params);
+      // if this is a synchronized table (managed or external.purge table) then we
+      // create it in Kudu first
+      KuduCatalogOpExecutor.createSynchronizedTable(newTable, params);
     }
-    // When Kudu's integration with the Hive Metastore is enabled, Kudu will create
-    // the HMS table for managed tables.
-    boolean createsHMSTable = Table.isExternalTable(newTable) ?
-        true : !isKuduHmsIntegrationEnabled(newTable);
+    // if the table is not synchronized table (means it is a external table), we need to
+    // create the HMS table. Otherwise, we create the Kudu table first and then
+    // the HMS table above. Additionally, in the second case, KuduHMSIntegration
+    // creates a HMS table for you and hence we don't need to create the HMS table here
+    boolean createHMSTable =
+        !KuduTable.isSynchronizedTable(newTable) || !isKuduHmsIntegrationEnabled(newTable);
     try {
       // Add the table to the HMS and the catalog cache. Acquire metastoreDdlLock_ to
       // ensure the atomicity of these operations.
       synchronized (metastoreDdlLock_) {
-        if (createsHMSTable) {
+        if (createHMSTable) {
           try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
             msClient.getHiveClient().createTable(newTable);
           }
@@ -2243,8 +2252,8 @@ public class CatalogOpExecutor {
       }
     } catch (Exception e) {
       try {
-        // Error creating the table in HMS, drop the managed table from Kudu.
-        if (!Table.isExternalTable(newTable)) {
+        // Error creating the table in HMS, drop the synchronized table from Kudu.
+        if (!KuduTable.isSynchronizedTable(newTable)) {
           KuduCatalogOpExecutor.dropTable(newTable, false);
         }
       } catch (Exception logged) {
