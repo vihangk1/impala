@@ -82,6 +82,25 @@ df || true
 # The CDP build prepopulates the ccache directory. Zero ccache statistics to ignore
 # this irrelevent past.
 ccache -z || true
+# The CDP build can run in different directories for different Jenkins jobs. To share
+# the ccache between them, the directory name needs to be excluded from the ccache hash.
+# There are two ccache options needed to handle the different directories:
+# 1. CCACHE_BASEDIR corrects absolute paths in the compilation commands.
+#    It is important that this correction work for the compiler as well as the code.
+#    For Kudu compilation, the code being compiled is inside KUDU_HOME, but the compiler
+#    is in IMPALA_TOOLCHAIN (inside IMPALA_HOME). CCACHE_BASEDIR needs to correct both,
+#    so it needs to be a common directory above both KUDU_HOME and IMPALA_HOME. So, this
+#    is set to SOURCE_ROOT. This handles the differences between the different Jenkins
+#    jobs. This setting also works for Impala compilation.
+# 2. CCACHE_NOHASHDIR tells ccache not to hash the directory name. Set this to true.
+#    The implication of ignoring the directory is that the wrong directory name can be
+#    embedded in the binary (e.g. in the debug info). This should be harmless, since the
+#    tools that use it (gdb) have ways of overriding it (and the existing directory is
+#    already bogus).
+# These settings work for all the compilation (Kudu and Impala), so set this once for the
+# whole script.
+export CCACHE_BASEDIR="$(cd ${SOURCE_ROOT} && pwd)"
+export CCACHE_NOHASHDIR="true"
 
 # Step 1: Build Kudu with Impala's native toolchain
 echo "### Building Kudu with Impala's native toolchain ###"
@@ -124,17 +143,6 @@ echo "Set IMPALA_BUILD_THREADS to ${IMPALA_BUILD_THREADS}"
 # Log ccache accesses to help diagnose bad cache hit rates
 # (Needs to be an absolute path, because ccache is invoked in many different directories)
 export CCACHE_LOGFILE="${IMPALA_HOME}/ccache-log-impala-build.txt"
-# The CDP build can run in different directories for different Jenkins jobs. To share
-# the ccache between them, the directory name needs to be excluded from the ccache hash.
-# There are two options needed to do that:
-# 1. CCACHE_BASEDIR corrects absolute paths in the compilation commands.
-#    (Use the actual IMPALA_HOME path without any /../'s)
-# 2. CCACHE_NOHASHDIR tells ccache not to hash the directory name.
-# The implication of ignoring the directory is that the wrong directory name can be
-# embedded in the binary (e.g. in the debug info). This should be harmless, since the
-# tools that use it (gdb) have ways of overriding it.
-export CCACHE_BASEDIR="$(cd ${IMPALA_HOME} && pwd)"
-export CCACHE_NOHASHDIR="true"
 time ./buildall.sh -noclean -notests -release_and_debug
 ccache -s || true
 df || true
