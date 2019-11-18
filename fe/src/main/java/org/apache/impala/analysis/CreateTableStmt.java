@@ -28,6 +28,7 @@ import org.apache.hadoop.hive.metastore.api.SQLPrimaryKey;
 import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.RowFormat;
+import org.apache.impala.catalog.Table;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.common.RuntimeEnv;
@@ -323,7 +324,7 @@ public class CreateTableStmt extends StatementBase {
     putGeneratedKuduProperty(KuduTable.KEY_STORAGE_HANDLER,
         KuduTable.KUDU_STORAGE_HANDLER);
 
-    String kuduMasters = populateKuduMasters(analyzer);
+    String kuduMasters = getKuduMasters(analyzer);
     if (kuduMasters.isEmpty()) {
       throw new AnalysisException(String.format(
           "Table property '%s' is required when the impalad startup flag " +
@@ -348,7 +349,7 @@ public class CreateTableStmt extends StatementBase {
    *  Populates Kudu master addresses either from table property or
    *  the -kudu_master_hosts flag.
    */
-  private String populateKuduMasters(Analyzer analyzer) {
+  private String getKuduMasters(Analyzer analyzer) {
     String kuduMasters = getTblProperties().get(KuduTable.KEY_MASTER_HOSTS);
     if (Strings.isNullOrEmpty(kuduMasters)) {
       kuduMasters = analyzer.getCatalog().getDefaultKuduMasterHosts();
@@ -361,6 +362,21 @@ public class CreateTableStmt extends StatementBase {
    */
   private void analyzeExternalKuduTableParams(Analyzer analyzer)
       throws AnalysisException {
+    if (Boolean.parseBoolean(getTblProperties().get(Table.TBL_PROP_EXTERNAL_TABLE_PURGE))) {
+      // this is a external table with purge property set to true
+      // in this case, we enforce that user does not specify a kudu table name since we
+      // want to treat this as a "managed" table
+      AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
+          String.format("Not allowed to set '%s' manually for synchronized Kudu tables .",
+              KuduTable.KEY_TABLE_NAME));
+      putGeneratedKuduTblNameProperty(analyzer);
+      // in case of synchronized table, it is possible that the user has provided a
+      // partitioning scheme. If the user has not explicitly provided a partitioning
+      // columns, use the primary keys similar to what we do for managed tables.
+      analyzeKuduPartitionParams(analyzer);
+      return;
+    }
+    // this is just a regular external table. Kudu table name must be specified
     AnalysisUtils.throwIfNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
         String.format("Table property %s must be specified when creating " +
             "an external Kudu table.", KuduTable.KEY_TABLE_NAME));
@@ -372,13 +388,6 @@ public class CreateTableStmt extends StatementBase {
     AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLET_REPLICAS),
         String.format("Table property '%s' cannot be used with an external Kudu table.",
             KuduTable.KEY_TABLET_REPLICAS));
-    // External table cannot have 'external.table.purge' property set, which is considered
-    // equivalent to managed table.
-    if (Boolean.parseBoolean(
-            getTblProperties().get(KuduTable.TBL_PROP_EXTERNAL_TABLE_PURGE))) {
-      throw new AnalysisException(String.format("Table property '%s' cannot be set to " +
-          "true with an external Kudu table.", KuduTable.TBL_PROP_EXTERNAL_TABLE_PURGE));
-    }
     AnalysisUtils.throwIfNotEmpty(getColumnDefs(),
         "Columns cannot be specified with an external Kudu table.");
     AnalysisUtils.throwIfNotEmpty(getKuduPartitionParams(),
@@ -418,13 +427,7 @@ public class CreateTableStmt extends StatementBase {
             "zero. Given number of replicas is: " + r.toString());
       }
     }
-
-    if (!getKuduPartitionParams().isEmpty()) {
-      analyzeKuduPartitionParams(analyzer);
-    } else {
-      analyzer.addWarning(
-          "Unpartitioned Kudu tables are inefficient for large data sizes.");
-    }
+    analyzeKuduPartitionParams(analyzer);
   }
 
   /**
@@ -436,7 +439,12 @@ public class CreateTableStmt extends StatementBase {
     AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
         String.format("Not allowed to set '%s' manually for managed Kudu tables .",
             KuduTable.KEY_TABLE_NAME));
-    String kuduMasters = populateKuduMasters(analyzer);
+    putGeneratedKuduTblNameProperty(analyzer);
+  }
+
+  private void putGeneratedKuduTblNameProperty(Analyzer analyzer)
+      throws AnalysisException {
+    String kuduMasters = getKuduMasters(analyzer);
     boolean isHMSIntegrationEnabled;
     try {
       // Check if Kudu's integration with the Hive Metastore is enabled. Validation
@@ -452,10 +460,16 @@ public class CreateTableStmt extends StatementBase {
   }
 
   /**
-   * Analyzes the partitioning schemes specified in the CREATE TABLE statement.
+   * Analyzes the partitioning schemes specified in the CREATE TABLE statement. Also,
+   * adds primary keys to the partitioning scheme if no partitioning keys are provided
    */
   private void analyzeKuduPartitionParams(Analyzer analyzer) throws AnalysisException {
     Preconditions.checkState(getFileFormat() == THdfsFileFormat.KUDU);
+    if (getKuduPartitionParams().isEmpty()) {
+      analyzer.addWarning(
+          "Unpartitioned Kudu tables are inefficient for large data sizes.");
+      return;
+    }
     Map<String, ColumnDef> pkColDefsByName =
         ColumnDef.mapByColumnNames(getPrimaryKeyColumnDefs());
     for (KuduPartitionParam partitionParam: getKuduPartitionParams()) {

@@ -23,7 +23,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.impala.catalog.FeKuduTable;
 import org.apache.impala.catalog.KuduColumn;
@@ -87,13 +86,18 @@ public class KuduCatalogOpExecutor {
     try {
       // TODO: The IF NOT EXISTS case should be handled by Kudu to ensure atomicity.
       // (see KUDU-1710).
-      if (KuduTable.isExternalPurgeTable(msTbl) && !StringUtils.isEmpty(kuduTableName)) {
-        // we expect that if external.purge.table is set to true in tblproperties
-      }
-      if (kudu.tableExists(kuduTableName)) {
-        if (params.if_not_exists) return;
+      boolean tableExists = kudu.tableExists(kuduTableName);
+      if (tableExists && params.if_not_exists) return;
+
+      // if table is externalPurgeTable (external.purge.table = true in tblproperties)
+      // then we should create the Kudu table if it does not exist
+      if (tableExists && !KuduTable.isExternalPurgeTable(msTbl)) {
         throw new ImpalaRuntimeException(String.format(
             "Table '%s' already exists in Kudu.", kuduTableName));
+      } else {
+        // if this is a external purge table which user wants us to create, the table
+        // name property must not be empty
+        Preconditions.checkState(!Strings.isNullOrEmpty(kuduTableName));
       }
       Schema schema = createTableSchema(params);
       CreateTableOptions tableOpts = buildTableOptions(msTbl, params, schema);
