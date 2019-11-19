@@ -118,7 +118,7 @@ public class AlterTableSetTblProperties extends AlterTableSetStmt {
     // TODO IMPALA-6375: Allow setting kudu.table_name for synchronized Kudu tables
     if (KuduTable.isSynchronizedTable(table_.getMetaStoreTable())) {
       AnalysisUtils.throwIfNotNull(tblProperties_.get(KuduTable.KEY_TABLE_NAME),
-          String.format("Not allowed to set '%s' manually for managed Kudu tables .",
+          String.format("Not allowed to set '%s' manually for synchronized Kudu tables .",
               KuduTable.KEY_TABLE_NAME));
     }
     // Throw error if kudu.table_id is provided for Kudu tables.

@@ -287,10 +287,14 @@ public class CreateTableStmt extends StatementBase {
     }
 
     analyzeKuduTableProperties(analyzer);
-    if (isExternal()) {
+    if (isExternal() && !Boolean.parseBoolean(getTblProperties().get(
+        Table.TBL_PROP_EXTERNAL_TABLE_PURGE))) {
+      // this is a legacy external table
       analyzeExternalKuduTableParams(analyzer);
     } else {
-      analyzeManagedKuduTableParams(analyzer);
+      // this is either a managed table or a external table with external.table.purge
+      // property set to true
+      analyzeSynchronizedKuduTableParams(analyzer);
     }
   }
 
@@ -362,20 +366,6 @@ public class CreateTableStmt extends StatementBase {
    */
   private void analyzeExternalKuduTableParams(Analyzer analyzer)
       throws AnalysisException {
-    if (Boolean.parseBoolean(getTblProperties().get(Table.TBL_PROP_EXTERNAL_TABLE_PURGE))) {
-      // this is a external table with purge property set to true
-      // in this case, we enforce that user does not specify a kudu table name since we
-      // want to treat this as a "managed" table
-      AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
-          String.format("Not allowed to set '%s' manually for synchronized Kudu tables .",
-              KuduTable.KEY_TABLE_NAME));
-      putGeneratedKuduTblNameProperty(analyzer);
-      // in case of synchronized table, it is possible that the user has provided a
-      // partitioning scheme. If the user has not explicitly provided a partitioning
-      // columns, use the primary keys similar to what we do for managed tables.
-      analyzeKuduPartitionParams(analyzer);
-      return;
-    }
     // this is just a regular external table. Kudu table name must be specified
     AnalysisUtils.throwIfNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
         String.format("Table property %s must be specified when creating " +
@@ -388,6 +378,13 @@ public class CreateTableStmt extends StatementBase {
     AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLET_REPLICAS),
         String.format("Table property '%s' cannot be used with an external Kudu table.",
             KuduTable.KEY_TABLET_REPLICAS));
+    // External table cannot have 'external.table.purge' property set, which is considered
+    // equivalent to managed table.
+    if (Boolean.parseBoolean(
+        getTblProperties().get(KuduTable.TBL_PROP_EXTERNAL_TABLE_PURGE))) {
+      throw new AnalysisException(String.format("Table property '%s' cannot be set to " +
+          "true with an external Kudu table.", KuduTable.TBL_PROP_EXTERNAL_TABLE_PURGE));
+    }
     AnalysisUtils.throwIfNotEmpty(getColumnDefs(),
         "Columns cannot be specified with an external Kudu table.");
     AnalysisUtils.throwIfNotEmpty(getKuduPartitionParams(),
@@ -395,10 +392,10 @@ public class CreateTableStmt extends StatementBase {
   }
 
   /**
-   * Analyzes and checks parameters specified for managed Kudu tables.
+   * Analyzes and checks parameters specified for synchronized Kudu tables.
    */
-  private void analyzeManagedKuduTableParams(Analyzer analyzer) throws AnalysisException {
-    analyzeManagedKuduTableName(analyzer);
+  private void analyzeSynchronizedKuduTableParams(Analyzer analyzer) throws AnalysisException {
+    analyzeSynchronizedKuduTableName(analyzer);
 
     // Check column types are valid Kudu types
     for (ColumnDef col: getColumnDefs()) {
@@ -435,15 +432,10 @@ public class CreateTableStmt extends StatementBase {
    * it in TableDef.generatedKuduTableName_. Throws if the Kudu table
    * name was given manually via TBLPROPERTIES.
    */
-  private void analyzeManagedKuduTableName(Analyzer analyzer) throws AnalysisException {
+  private void analyzeSynchronizedKuduTableName(Analyzer analyzer) throws AnalysisException {
     AnalysisUtils.throwIfNotNull(getTblProperties().get(KuduTable.KEY_TABLE_NAME),
-        String.format("Not allowed to set '%s' manually for managed Kudu tables .",
+        String.format("Not allowed to set '%s' manually for synchronized Kudu tables.",
             KuduTable.KEY_TABLE_NAME));
-    putGeneratedKuduTblNameProperty(analyzer);
-  }
-
-  private void putGeneratedKuduTblNameProperty(Analyzer analyzer)
-      throws AnalysisException {
     String kuduMasters = getKuduMasters(analyzer);
     boolean isHMSIntegrationEnabled;
     try {
@@ -458,6 +450,7 @@ public class CreateTableStmt extends StatementBase {
     putGeneratedKuduProperty(KuduTable.KEY_TABLE_NAME,
         KuduUtil.getDefaultKuduTableName(getDb(), getTbl(), isHMSIntegrationEnabled));
   }
+
 
   /**
    * Analyzes the partitioning schemes specified in the CREATE TABLE statement. Also,
