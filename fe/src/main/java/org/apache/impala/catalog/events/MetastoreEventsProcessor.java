@@ -590,6 +590,7 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   @VisibleForTesting
   protected void processEvents(List<NotificationEvent> events)
       throws MetastoreNotificationException {
+    if (events.isEmpty()) return;
     NotificationEvent lastProcessedEvent = null;
     final Timer.Context context =
         metrics_.getTimer(EVENTS_PROCESS_DURATION_METRIC).time();
@@ -597,6 +598,10 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     try {
       List<MetastoreEvent> filteredEvents =
           metastoreEventFactory_.getFilteredEvents(events);
+      if (filteredEvents.isEmpty()) {
+        lastSyncedEventId_.set(events.get(events.size() - 1).getEventId());
+        return;
+      }
       for (MetastoreEvent event : filteredEvents) {
         // synchronizing each event processing reduces the scope of the lock so the a
         // potential reset() during event processing is not blocked for longer than
