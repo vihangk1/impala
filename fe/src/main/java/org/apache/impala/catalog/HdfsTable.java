@@ -64,6 +64,7 @@ import org.apache.impala.common.Pair;
 import org.apache.impala.common.PrintUtils;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbFileBlock;
+import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.CatalogLookupStatus;
 import org.apache.impala.thrift.CatalogObjectsConstants;
 import org.apache.impala.thrift.TAccessLevel;
@@ -378,6 +379,13 @@ public class HdfsTable extends Table implements FeFsTable {
   @Override // FeFsTable
   public Set<Long> getNullPartitionIds(int i) { return nullPartitionIds_.get(i); }
 
+  @Override
+  public List<? extends FeFsPartition> loadPartitions(Collection<Long> ids,
+      ThriftObjectType type) {
+    // we ignore the ThriftObjectType here
+    return loadPartitions(ids, ThriftObjectType.FULL);
+  }
+
   public HdfsPartitionLocationCompressor getPartitionLocationCompressor() {
     return partitionLocationCompressor_;
   }
@@ -580,12 +588,18 @@ public class HdfsTable extends Table implements FeFsTable {
   /**
    * Loads valid txn list from HMS. Re-throws exceptions as CatalogException.
    */
-  private ValidTxnList loadValidTxns(IMetaStoreClient client) throws CatalogException {
+  private static ValidTxnList loadValidTxns(IMetaStoreClient client) throws CatalogException {
     try {
       return MetastoreShim.getValidTxns(client);
     } catch (TException exception) {
       throw new CatalogException(exception.getMessage());
     }
+  }
+
+  private void loadFileMetadataForPartitions(IMetaStoreClient client,
+      Iterable<HdfsPartition> parts, boolean isRefresh) throws CatalogException {
+    loadFileMetadataForPartitions(client, parts, isRefresh, getFullName(),
+        validWriteIds_, hostIndex_, getMetaStoreTable().getParameters(), getLocation());
   }
 
   /**
@@ -595,8 +609,14 @@ public class HdfsTable extends Table implements FeFsTable {
    * @param isRefresh whether this is a refresh operation or an initial load. This only
    * affects logging.
    */
-  private void loadFileMetadataForPartitions(IMetaStoreClient client,
-      Iterable<HdfsPartition> parts, boolean isRefresh) throws CatalogException {
+  private static void loadFileMetadataForPartitions(IMetaStoreClient client,
+      Iterable<HdfsPartition> parts, boolean isRefresh, String fullName,
+      String validWriteIds, ListMap<TNetworkAddress> hostIndex,
+      Map<String, String> tblProperties, String tblLocation) throws CatalogException {
+    if (BackendConfig.INSTANCE.skipFileMetadataLoading()) {
+      LOG.info("Skipping file metadata loading for table " + fullName);
+      return;
+    }
     final Clock clock = Clock.defaultClock();
     long startTime = clock.getTick();
     // Group the partitions by their path (multiple partitions may point to the same
@@ -608,8 +628,8 @@ public class HdfsTable extends Table implements FeFsTable {
           .add(p);
     }
 
-    ValidWriteIdList writeIds = validWriteIds_ != null
-        ? MetastoreShim.getValidWriteIdListFromString(validWriteIds_) : null;
+    ValidWriteIdList writeIds = validWriteIds != null
+        ? MetastoreShim.getValidWriteIdListFromString(validWriteIds) : null;
     //TODO: maybe it'd be better to load the valid txn list in the context of a
     // transaction to have consistent valid write ids and valid transaction ids.
     // Currently tables are loaded when they are first referenced and stay in catalog
@@ -623,8 +643,8 @@ public class HdfsTable extends Table implements FeFsTable {
     for (Map.Entry<Path, List<HdfsPartition>> e : partsByPath.entrySet()) {
       List<FileDescriptor> oldFds = e.getValue().get(0).getFileDescriptors();
       FileMetadataLoader loader = new FileMetadataLoader(e.getKey(),
-          Utils.shouldRecursivelyListPartitions(this),
-          oldFds, hostIndex_, validTxnList, writeIds);
+          Utils.shouldRecursivelyListPartitions(tblProperties),
+          oldFds, hostIndex, validTxnList, writeIds);
       // If there is a cached partition mapped to this path, we recompute the block
       // locations even if the underlying files have not changed.
       // This is done to keep the cached block metadata up to date.
@@ -637,12 +657,12 @@ public class HdfsTable extends Table implements FeFsTable {
     String logPrefix = String.format(
         "%s file and block metadata for %s paths for table %s",
         isRefresh ? "Refreshing" : "Loading", partsByPath.size(),
-        getFullName());
+        fullName);
     FileSystem tableFs;
     try {
-      tableFs = (new Path(getLocation())).getFileSystem(CONF);
+      tableFs = (new Path(tblLocation)).getFileSystem(CONF);
     } catch (IOException e) {
-      throw new CatalogException("Invalid table path for table: " + getFullName(), e);
+      throw new CatalogException("Invalid table path for table: " + fullName, e);
     }
 
     // Actually load the partitions.
@@ -676,7 +696,7 @@ public class HdfsTable extends Table implements FeFsTable {
 
     long duration = clock.getTick() - startTime;
     LOG.info("Loaded file and block metadata for {} partitions: {}. Time taken: {}",
-        getFullName(), partNames, PrintUtils.printTimeNs(duration));
+        fullName, partNames, PrintUtils.printTimeNs(duration));
   }
 
   /**

@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog.local;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
@@ -107,6 +108,17 @@ public interface MetaProvider {
       throws MetaException, TException;
 
   /**
+   * Load the file metadata for given list of partitions
+   * @param table
+   * @param partitionMetadatas
+   * @param hostIndex
+   * @return
+   */
+  Map<PartitionMetadata, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
+      TableMetaRef table, List<PartitionMetadata> partitionMetadatas,
+      ListMap<TNetworkAddress> hostIndex);
+
+  /**
    * Load statistics for the given columns from the given table.
    *
    * NOTE: Stats should not be returned for the partition columns of FS-backed
@@ -122,6 +134,7 @@ public interface MetaProvider {
    * in order to perform concurrency control checks, etc.
    */
   interface TableMetaRef {
+    Table getHmsTable();
   }
 
   /**
@@ -138,7 +151,6 @@ public interface MetaProvider {
    */
   interface PartitionMetadata {
     Partition getHmsPartition();
-    ImmutableList<FileDescriptor> getFileDescriptors();
     byte[] getPartitionStats();
     boolean hasIncrementalStats();
   }
