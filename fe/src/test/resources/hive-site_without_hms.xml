@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="configuration.xsl"?>
+<!--
+
+NOTE: THIS FILE IS AUTO-GENERATED FROM:
+  /home/vihang/work/src/upstream/cdp/impala/fe/src/test/resources/hive-site.xml.py
+
+EDITS BY HAND WILL BE LOST!
+
+-->
+<configuration>
+      <property>
+        <name>datanucleus.autoCreateSchema</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>datanucleus.fixedDatastore</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>datanucleus.metadata.validate</name>
+        <value>false</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionDriverName</name>
+        <value>org.postgresql.Driver</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionPassword</name>
+        <value>password</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionURL</name>
+        <value>jdbc:postgresql://localhost:5432/HMS_home_vihang_work_src_upstream_cdp_impala_cdp</value>
+      </property>
+      <property>
+        <name>javax.jdo.option.ConnectionUserName</name>
+        <value>hiveuser</value>
+      </property>
+</configuration>

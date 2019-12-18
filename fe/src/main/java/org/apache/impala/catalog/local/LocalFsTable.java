@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog.local;
 
+import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -44,6 +45,7 @@ import org.apache.impala.catalog.FeCatalogUtils;
 import org.apache.impala.catalog.FeFsPartition;
 import org.apache.impala.catalog.FeFsTable;
 import org.apache.impala.catalog.HdfsFileFormat;
+import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.catalog.HdfsTable;
 import org.apache.impala.catalog.PrunablePartition;
 import org.apache.impala.catalog.SqlConstraints;
@@ -297,7 +299,8 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
       referencedPartitions = getPartitionIds();
     }
     Map<Long, THdfsPartition> idToPartition = new HashMap<>();
-    List<? extends FeFsPartition> partitions = loadPartitions(referencedPartitions);
+    List<? extends FeFsPartition> partitions =
+        loadPartitions(referencedPartitions, ThriftObjectType.DESCRIPTOR_ONLY);
     for (FeFsPartition partition : partitions) {
       idToPartition.put(partition.getId(),
           FeCatalogUtils.fsPartitionToThrift(partition,
@@ -389,8 +392,9 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
   }
 
   @Override
-  public List<? extends FeFsPartition> loadPartitions(Collection<Long> ids) {
-    // TODO(todd) it seems like some queries actually call this multiple times.
+  public List<? extends FeFsPartition> loadPartitions(Collection<Long> ids,
+      ThriftObjectType type) {
+      // TODO(todd) it seems like some queries actually call this multiple times.
     // Perhaps we should store the result in this class, instead of relying on
     // catalog-layer caching?
     Preconditions.checkState(partitionSpecs_ != null,
@@ -415,6 +419,12 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
       throw new LocalCatalogException(
           "Could not load partitions for table " + getFullName(), e);
     }
+    Map<PartitionMetadata, ImmutableList<FileDescriptor>> filemetadata =
+        Maps.newHashMap();
+    if (type == ThriftObjectType.FULL) {
+      filemetadata = db_.getCatalog().getMetaProvider().loadPartitionFileMetadata(ref_,
+          Lists.newArrayList(partsByName.values()), hostIndex_);
+    }
     List<FeFsPartition> ret = Lists.newArrayListWithCapacity(ids.size());
     for (Long id : ids) {
       LocalPartitionSpec spec = partitionSpecs_.get(id);
@@ -427,12 +437,19 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
             ": missing expected partition with name '" + spec.getRef().getName() +
             "' (perhaps it was concurrently dropped by another process)");
       }
-
+      //Preconditions.checkState();
+      ImmutableList<FileDescriptor> fds = filemetadata.containsKey(p) ?
+          filemetadata.get(p) : ImmutableList.of();
       LocalFsPartition part = new LocalFsPartition(this, spec, p.getHmsPartition(),
-          p.getFileDescriptors(), p.getPartitionStats(), p.hasIncrementalStats());
+          fds, p.getPartitionStats(), p.hasIncrementalStats());
       ret.add(part);
     }
     return ret;
+  }
+
+  @Override
+  public List<? extends FeFsPartition> loadPartitions(Collection<Long> ids) {
+    return loadPartitions(ids, ThriftObjectType.FULL);
   }
 
   private List<String> getClusteringColumnNames() {

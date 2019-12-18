@@ -33,6 +33,7 @@ import org.apache.hadoop.hive.metastore.api.SQLPrimaryKey;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.PartitionKeyValue;
+import org.apache.impala.catalog.CatalogObject.ThriftObjectType;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.FileSystemUtil;
@@ -176,6 +177,8 @@ public interface FeFsTable extends FeTable {
    */
   Set<Long> getNullPartitionIds(int colIdx);
 
+  List<? extends FeFsPartition> loadPartitions(Collection<Long> ids,
+      ThriftObjectType type);
   /**
    * Returns the full partition objects for the given partition IDs, which must
    * have been obtained by prior calls to the above methods.
@@ -287,16 +290,14 @@ public interface FeFsTable extends FeTable {
      * Reconciles the Impalad-wide --recursively_list_partitions and the
      * TBL_PROP_DISABLE_RECURSIVE_LISTING table property
      */
-    public static boolean shouldRecursivelyListPartitions(FeFsTable table) {
-      org.apache.hadoop.hive.metastore.api.Table msTbl = table.getMetaStoreTable();
-      String propVal = msTbl.getParameters().get(
+    public static boolean shouldRecursivelyListPartitions(Map<String, String> tblProperties) {
+      String propVal = tblProperties.get(
           HdfsTable.TBL_PROP_DISABLE_RECURSIVE_LISTING);
       if (propVal == null) return BackendConfig.INSTANCE.recursivelyListPartitions();
       // TODO(todd): we should detect if this flag is set on an ACID table and
       // give some kind of error (we _must_ recursively list such tables)
       return !Boolean.parseBoolean(propVal);
     }
-
     /**
      * Returns an estimated row count for the given number of file bytes. The row count is
      * extrapolated using the table-level row count and file bytes statistics.

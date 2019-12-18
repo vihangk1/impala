@@ -240,6 +240,14 @@ class DirectMetaProvider implements MetaProvider {
     return ret;
   }
 
+  @Override
+  public Map<PartitionMetadata, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
+      TableMetaRef table, List<PartitionMetadata> partitionMetadatas,
+      ListMap<TNetworkAddress> hostIndex) {
+    throw new UnsupportedOperationException("Directmetadata provider does not support "
+        + "file metadata loading");
+  }
+
   /**
    * We model partitions slightly differently to Hive. So, in the case of an
    * unpartitioned table, we have to create a fake Partition object which has the
@@ -351,22 +359,15 @@ class DirectMetaProvider implements MetaProvider {
 
   private static class PartitionMetadataImpl implements PartitionMetadata {
     private final Partition msPartition_;
-    private final ImmutableList<FileDescriptor> fds_;
 
     public PartitionMetadataImpl(Partition msPartition,
         ImmutableList<FileDescriptor> fds) {
       this.msPartition_ = msPartition;
-      this.fds_ = fds;
     }
 
     @Override
     public Partition getHmsPartition() {
       return msPartition_;
-    }
-
-    @Override
-    public ImmutableList<FileDescriptor> getFileDescriptors() {
-      return fds_;
     }
 
     @Override
@@ -392,6 +393,8 @@ class DirectMetaProvider implements MetaProvider {
       this.tableName_ = tableName;
       this.msTable_ = msTable;
     }
+
+    public Table getHmsTable() {return msTable_.deepCopy(); }
 
     private boolean isPartitioned() {
       return msTable_.getPartitionKeysSize() != 0;

@@ -82,7 +82,7 @@ public class ParallelFileMetadataLoader {
    * an exception. However, any successful loaders are guaranteed to complete
    * before any exception is thrown.
    */
-  void load() throws TableLoadingException {
+  public void load() throws TableLoadingException {
     if (loaders_.isEmpty()) return;
 
     int failedLoadTasks = 0;
