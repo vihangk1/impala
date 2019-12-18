@@ -153,4 +153,6 @@ struct TBackendGflags {
   64: required bool use_customized_user_groups_mapper_for_ranger
 
   65: required bool enable_column_masking
+
+  66: required bool skip_filemetadata_loading
 }

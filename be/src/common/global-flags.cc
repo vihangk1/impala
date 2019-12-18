@@ -314,6 +314,8 @@ DEFINE_bool_hidden(use_customized_user_groups_mapper_for_ranger, false,
 
 DEFINE_bool(enable_column_masking, true,
     "If false, disable the column masking feature. Defaults to be true.");
+DEFINE_bool(skip_filemetadata_loading, true,
+    "If true, catalogd skips file metadata loading");
 
 // ++========================++
 // || Startup flag graveyard ||
