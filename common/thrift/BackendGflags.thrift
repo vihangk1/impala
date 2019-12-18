@@ -145,4 +145,6 @@ struct TBackendGflags {
   60: required bool simplify_check_on_show_tables
 
   61: required bool mt_dop_auto_fallback
+
+  62: required bool skip_filemetadata_loading
 }

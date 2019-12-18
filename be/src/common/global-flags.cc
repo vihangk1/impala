@@ -294,6 +294,9 @@ DEFINE_int64(impala_slow_rpc_threshold_ms, 2 * 60 * 1000,
     "may result in false positives"
     "This overrides KRPC's --rpc_duration_too_long_ms setting.");
 
+DEFINE_bool(skip_filemetadata_loading, true,
+    "If true, catalogd skips file metadata loading");
+
 // ++========================++
 // || Startup flag graveyard ||
 // ++========================++
