@@ -192,6 +192,7 @@ export IMPALA_KITE_VERSION=1.0.0-cdh6.x-SNAPSHOT
 export IMPALA_KUDU_JAVA_VERSION=1.11.0-cdh6.x-SNAPSHOT
 export CDP_ATLAS_VERSION=2.0.0.7.1.0.0-33
 export CDP_ATLAS_BUILD_NUMBER=1352353
+export IMPALA_ORC_JAVA_VERSION=1.6.2
 
 # When IMPALA_(CDH_COMPONENT)_URL are overridden, they may contain '$(platform_label)'
 # which will be substituted for the CDH platform label in bootstrap_toolchain.py
