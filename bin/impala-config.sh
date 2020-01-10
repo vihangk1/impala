@@ -375,7 +375,6 @@ else
   export HBASE_HOME="$CDH_COMPONENTS_HOME/hbase-${IMPALA_HBASE_VERSION}/"
   export METASTORE_DB=${METASTORE_DB-$(cut -c-63 <<< HMS$ESCAPED_IMPALA_HOME)}
 fi
-export METASTORE_DB_PORT=${METASTORE_DB_PORT-5432}
 # Set the Hive binaries in the path
 export PATH="$HIVE_HOME/bin:$PATH"
 
