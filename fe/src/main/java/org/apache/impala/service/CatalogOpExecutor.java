@@ -3126,6 +3126,7 @@ public class CatalogOpExecutor {
       TableName tableName = tbl.getTableName();
       HdfsPartition partition = catalog_.getHdfsPartition(
           tableName.getDb(), tableName.getTbl(), partitionSpec);
+      //TODO(Vihang) We should avoid making in-place modifications
       partition.setLocation(location);
       try {
         applyAlterPartition(tbl, partition);

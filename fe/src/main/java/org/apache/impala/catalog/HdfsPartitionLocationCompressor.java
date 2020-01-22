@@ -19,6 +19,7 @@ package org.apache.impala.catalog;
 
 import java.util.List;
 
+import com.google.errorprone.annotations.Immutable;
 import org.apache.impala.common.Pair;
 import org.apache.impala.thrift.THdfsPartitionLocation;
 import org.apache.impala.util.ListMap;
@@ -80,6 +81,7 @@ class HdfsPartitionLocationCompressor {
 
   // A surrogate for THdfsPartitionLocation, which represents a partition's location
   // relative to its parent table's list of partition prefixes.
+  @Immutable
   public class Location {
     // 'prefix_index_' represents the portion of the partition's location that comes before
     // the last N directories, where N is the number of partitioning columns.
