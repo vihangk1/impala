@@ -30,12 +30,7 @@ import org.apache.impala.planner.HdfsPartitionPruner;
  * be implemented by only fetching partition names and not the complete
  * partition metadata.
  */
-public interface PrunablePartition {
-  /**
-   * Returns the identifier of this partition, suitable for later passing
-   * to {@link FeFsTable#loadPartitions(java.util.Collection)}
-   */
-  public long getId();
+public interface PrunablePartition extends FePartition {
 
   /**
    * Returns the values associated with this partition

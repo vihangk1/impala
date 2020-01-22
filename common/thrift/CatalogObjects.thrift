@@ -41,6 +41,7 @@ enum TCatalogObjectType {
   HDFS_CACHE_POOL = 9
   // A catalog object type as a marker for authorization cache invalidation.
   AUTHZ_CACHE_INVALIDATION = 10
+  PARTITION = 11
 }
 
 enum TTableType {
@@ -667,4 +668,7 @@ struct TCatalogObject {
 
   // Set iff object type is AUTHZ_CACHE_INVALIDATION
   11: optional TAuthzCacheInvalidation authz_cache_invalidation
+
+  // Set iff object type is PARTITION
+  12: optional THdfsPartition partition
 }

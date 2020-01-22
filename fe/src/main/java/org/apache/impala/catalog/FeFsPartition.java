@@ -32,17 +32,12 @@ import org.apache.impala.thrift.TPartitionStats;
 /**
  * Frontend interface for interacting with a single filesystem-based partition.
  */
-public interface FeFsPartition {
+public interface FeFsPartition extends FePartition {
   /**
    * @return a partition name formed by concatenating partition keys and their values,
    * compatible with the way Hive names partitions
    */
   String getPartitionName();
-
-  /**
-   * @return the ID for this partition which identifies it within its parent table.
-   */
-  long getId();
 
   /**
    * @return the table that contains this partition

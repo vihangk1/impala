@@ -47,15 +47,7 @@ import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbCompression;
 import org.apache.impala.fb.FbFileBlock;
 import org.apache.impala.fb.FbFileDesc;
-import org.apache.impala.thrift.CatalogObjectsConstants;
-import org.apache.impala.thrift.TAccessLevel;
-import org.apache.impala.thrift.TExpr;
-import org.apache.impala.thrift.TExprNode;
-import org.apache.impala.thrift.THdfsFileDesc;
-import org.apache.impala.thrift.THdfsPartition;
-import org.apache.impala.thrift.THdfsPartitionLocation;
-import org.apache.impala.thrift.TNetworkAddress;
-import org.apache.impala.thrift.TPartitionStats;
+import org.apache.impala.thrift.*;
 import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.ListMap;
 import org.slf4j.Logger;
@@ -81,8 +73,7 @@ import com.google.flatbuffers.FlatBufferBuilder;
  * order with NULLs sorting last. The ordering is useful for displaying partitions
  * in SHOW statements.
  */
-public class HdfsPartition implements FeFsPartition, PrunablePartition {
-
+public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, PrunablePartition {
   /**
    * Metadata for a single file in this partition.
    */
@@ -669,6 +660,29 @@ public class HdfsPartition implements FeFsPartition, PrunablePartition {
                 ? msPartition.getSd().getLocation()
                 : table.getLocation()),
         accessLevel);
+  }
+  @Override
+  public TCatalogObjectType getCatalogObjectType() {
+    return TCatalogObjectType.PARTITION;
+  }
+
+  @Override
+  protected void setTCatalogObject(TCatalogObject catalogObject) {
+    catalogObject.setPartition(toThrift());
+  }
+
+  @Override
+  public String getName() {
+    return getPartitionName();
+  }
+
+  public THdfsPartition toThrift() {
+    if (!getTable().getLock().isHeldByCurrentThread()) {
+      throw new IllegalStateException(
+          "HdfsPartition.toThrift() called without taking the table lock:" + getTable()
+              .getFullName() + " : " + getPartitionName());
+    }
+    return FeCatalogUtils.fsPartitionToThrift(this, ThriftObjectType.FULL);
   }
 
   @Override // FeFsPartition
