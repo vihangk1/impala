@@ -754,7 +754,6 @@ public class CatalogOpExecutor {
                 op + numUpdatedPartitions.getRef() + " partition(s).");
           }
           break;
-        //TODO(Vihang) restart checking from here
         case RECOVER_PARTITIONS:
           alterTableRecoverPartitions(tbl);
           addSummary(response, "Partitions have been recovered.");
@@ -1434,6 +1433,7 @@ public class CatalogOpExecutor {
         }
 
         for(HdfsPartition partition : partitions) {
+          // TODO(Vihang) update the partition's catalog version here
           if (partition.getPartitionStatsCompressed() != null) {
             partition.dropPartitionStats();
             try {
