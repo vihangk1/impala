@@ -623,6 +623,8 @@ public class CatalogOpExecutor {
           // version.
           refreshedTable = alterTableAddPartitions(tbl, params.getAdd_partition_params());
           if (refreshedTable != null) {
+            //TODO(Vihang) don't update the table version since we are only going to update
+            // partition versions
             refreshedTable.setCatalogVersion(newCatalogVersion);
             // the alter table event is only generated when we add the partition. For
             // instance if not exists clause is provided and the partition is
@@ -660,11 +662,13 @@ public class CatalogOpExecutor {
               dropPartParams.isIf_exists(),
               dropPartParams.isPurge(), numUpdatedPartitions);
           if (refreshedTable != null) {
+            //TODO(Vihang) don't update the table version; update the partition version here instead
             refreshedTable.setCatalogVersion(newCatalogVersion);
             // we don't need to add catalog versions in partition's InflightEvents here
             // since by the time the event is received, the partition is already
             // removed from catalog and there is nothing to compare against during
             // self-event evaluation
+            //TODO(Vihang) add the partitions to the Catalog Delete log here
             addTableToCatalogUpdate(refreshedTable, response.result);
           }
           addSummary(response,
@@ -750,6 +754,7 @@ public class CatalogOpExecutor {
                 op + numUpdatedPartitions.getRef() + " partition(s).");
           }
           break;
+        //TODO(Vihang) restart checking from here
         case RECOVER_PARTITIONS:
           alterTableRecoverPartitions(tbl);
           addSummary(response, "Partitions have been recovered.");
@@ -882,6 +887,7 @@ public class CatalogOpExecutor {
     }
     HdfsTable hdfsTable = (HdfsTable) tbl;
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      //TODO(Vihang) we should add HdfsPartition catalog version here
       List<HdfsPartition> hdfsPartitions = hdfsTable.createAndLoadPartitions(
           msClient.getHiveClient(), partitions);
       for (HdfsPartition hdfsPartition : hdfsPartitions) {
@@ -1118,6 +1124,7 @@ public class CatalogOpExecutor {
             partition.getValuesAsString(), numRows));
       }
       PartitionStatsUtil.partStatsToPartition(partitionStats, partition);
+      //TODO(Vihang) Add partition catalog version
       partition.putToParameters(StatsSetupConst.ROW_COUNT, String.valueOf(numRows));
       // HMS requires this param for stats changes to take effect.
       partition.putToParameters(MetastoreShim.statsGeneratedViaStatsTaskParam());
@@ -3041,6 +3048,7 @@ public class CatalogOpExecutor {
       setStorageDescriptorFileFormat(msTbl.getSd(), fileFormat);
       // The prototype partition must be updated if the file format is changed so that new
       // partitions are created with the new file format.
+      //TODO(Vihang) Move this after applyAlterTable is successful
       if (tbl instanceof HdfsTable) ((HdfsTable) tbl).setPrototypePartition(msTbl.getSd());
       applyAlterTable(msTbl);
       reloadFileMetadata = true;
@@ -3050,9 +3058,14 @@ public class CatalogOpExecutor {
           ((HdfsTable) tbl).getPartitionsFromPartitionSet(partitionSet);
       List<HdfsPartition> modifiedParts = Lists.newArrayList();
       for(HdfsPartition partition: partitions) {
+        //TODO(Vihang) do we drop and recreate the partition here? Update the
+        //catalog version of the partition
         partition.setFileFormat(HdfsFileFormat.fromThrift(fileFormat));
         modifiedParts.add(partition);
       }
+      //TODO(Vihang) we are doing HMS operation after modifying the HdfsPartition object. We
+      // should change the order so that in case the HMS operation fails, we don't corrupt our
+      // cached metadata
       bulkAlterPartitions(tbl, modifiedParts, null);
       numUpdatedPartitions.setRef((long) modifiedParts.size());
     }
@@ -3087,9 +3100,13 @@ public class CatalogOpExecutor {
           ((HdfsTable) tbl).getPartitionsFromPartitionSet(partitionSet);
       List<HdfsPartition> modifiedParts = Lists.newArrayList();
       for(HdfsPartition partition: partitions) {
+        //TODO(Vihang) drop and readd the HdfsPartitions to make sure they are immutable? Update the
+        //Partition catalog versions
         HiveStorageDescriptorFactory.setSerdeInfo(rowFormat, partition.getSerdeInfo());
         modifiedParts.add(partition);
       }
+      //TODO(Vihang) we are making HMS changes after changes the cached HdfsPartition objects.
+      //Change the order so that we gracefully handle HMS failures
       bulkAlterPartitions(tbl, modifiedParts, null);
       numUpdatedPartitions.setRef((long) modifiedParts.size());
     }
@@ -3127,6 +3144,7 @@ public class CatalogOpExecutor {
       HdfsPartition partition = catalog_.getHdfsPartition(
           tableName.getDb(), tableName.getTbl(), partitionSpec);
       //TODO(Vihang) We should avoid making in-place modifications
+      //Update partition's catalog version here
       partition.setLocation(location);
       try {
         applyAlterPartition(tbl, partition);
@@ -3165,6 +3183,7 @@ public class CatalogOpExecutor {
             throw new UnsupportedOperationException(
                 "Unknown target TTablePropertyType: " + params.getTarget());
         }
+        //TODO(Vihang) update partition catalog version here
         modifiedParts.add(partition);
       }
       try {
@@ -3384,6 +3403,7 @@ public class CatalogOpExecutor {
               "ALTER PARTITION SET CACHED");
         }
         if (!partition.isMarkedCached()) {
+          //TODO(Vihang) update partition version here
           modifiedParts.add(partition);
         }
       }
@@ -3391,6 +3411,7 @@ public class CatalogOpExecutor {
       for (HdfsPartition partition : partitions) {
         if (partition.isMarkedCached()) {
           HdfsCachingUtil.removePartitionCacheDirective(partition);
+          //TODO(Vihang) update partition version here
           modifiedParts.add(partition);
         }
       }
