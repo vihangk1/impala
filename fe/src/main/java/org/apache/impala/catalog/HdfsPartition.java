@@ -685,6 +685,16 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
     return FeCatalogUtils.fsPartitionToThrift(this, ThriftObjectType.FULL);
   }
 
+  public TCatalogObject toMinimalTCatalogObject() {
+    TCatalogObject catalogObject =
+        new TCatalogObject(getCatalogObjectType(), getCatalogVersion());
+    catalogObject.setPartition(new THdfsPartition());
+    //TODO(Vihang) we should make sure that partition ids are globally unique not unique within
+    //a table
+    catalogObject.getPartition().setId(getId());
+    return catalogObject;
+  }
+
   @Override // FeFsPartition
   public HdfsStorageDescriptor getInputFormatDescriptor() {
     return fileFormatDescriptor_;
