@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -621,18 +622,20 @@ public class CatalogOpExecutor {
           // Create and add HdfsPartition objects to the corresponding HdfsTable and load
           // their block metadata. Get the new table object with an updated catalog
           // version.
-          refreshedTable = alterTableAddPartitions(tbl, params.getAdd_partition_params());
-          if (refreshedTable != null) {
-            //TODO(Vihang) don't update the table version since we are only going to update
-            // partition versions
-            refreshedTable.setCatalogVersion(newCatalogVersion);
+          List<HdfsPartition> addedPartitions = alterTableAddPartitions(tbl,
+              params.getAdd_partition_params());
+          if (addedPartitions != null && !addedPartitions.isEmpty()) {
             // the alter table event is only generated when we add the partition. For
             // instance if not exists clause is provided and the partition is
             // pre-existing there is no alter table event generated. Hence we should
             // only add the versions for in-flight events when we are sure that the
             // partition was really added.
             catalog_.addVersionsForInflightEvents(tbl, newCatalogVersion);
-            addTableToCatalogUpdate(refreshedTable, response.result);
+            for (HdfsPartition addedPartition : addedPartitions) {
+              //TODO(Vihang) may be combine with the loop below
+              addedPartition.setCatalogVersion(newCatalogVersion);
+            }
+            addPartitionsToCatalogUpdate(addedPartitions, response.result);
           }
           reloadMetadata = false;
           addSummary(response, "New partition has been added to the table.");
@@ -657,19 +660,16 @@ public class CatalogOpExecutor {
           // with an updated catalog version. If the partition does not exist and
           // "IfExists" is true, null is returned. If "purge" option is specified
           // partition data is purged by skipping Trash, if configured.
-          refreshedTable = alterTableDropPartition(
+          List<HdfsPartition> droppedPartitions = alterTableDropPartition(
               tbl, dropPartParams.getPartition_set(),
               dropPartParams.isIf_exists(),
               dropPartParams.isPurge(), numUpdatedPartitions);
-          if (refreshedTable != null) {
-            //TODO(Vihang) don't update the table version; update the partition version here instead
-            refreshedTable.setCatalogVersion(newCatalogVersion);
+          if (droppedPartitions != null && !droppedPartitions.isEmpty()) {
             // we don't need to add catalog versions in partition's InflightEvents here
             // since by the time the event is received, the partition is already
             // removed from catalog and there is nothing to compare against during
             // self-event evaluation
-            //TODO(Vihang) add the partitions to the Catalog Delete log here
-            addTableToCatalogUpdate(refreshedTable, response.result);
+            addPartitionsToCatalogUpdate(droppedPartitions, response.result, true);
           }
           addSummary(response,
               "Dropped " + numUpdatedPartitions.getRef() + " partition(s).");
@@ -877,7 +877,26 @@ public class CatalogOpExecutor {
     result.setVersion(updatedCatalogObject.getCatalog_version());
   }
 
-  private Table addHdfsPartitions(Table tbl, List<Partition> partitions)
+  private static void addPartitionsToCatalogUpdate(List<HdfsPartition> partitions,
+      TCatalogUpdateResult result) {
+    addPartitionsToCatalogUpdate(partitions, result, false);
+  }
+  private static void addPartitionsToCatalogUpdate(List<HdfsPartition> partitions,
+      TCatalogUpdateResult result, boolean addToRemoveList) {
+    Preconditions.checkState(partitions != null && !partitions.isEmpty());
+    for (HdfsPartition partition : partitions) {
+      TCatalogObject updatedCatalogObject = partition.toTCatalogObject();
+      if (addToRemoveList) {
+        result.addToRemoved_catalog_objects(updatedCatalogObject);
+      } else {
+        result.addToUpdated_catalog_objects(updatedCatalogObject);
+      }
+    }
+    //TODO(Vihang) need to understand here what should be the catalog version to be set
+    result.setVersion(partitions.get(partitions.size() - 1).getCatalogVersion());
+  }
+
+  private List<HdfsPartition> addHdfsPartitions(Table tbl, List<Partition> partitions)
       throws CatalogException {
     Preconditions.checkNotNull(tbl);
     Preconditions.checkNotNull(partitions);
@@ -886,14 +905,13 @@ public class CatalogOpExecutor {
     }
     HdfsTable hdfsTable = (HdfsTable) tbl;
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-      //TODO(Vihang) we should add HdfsPartition catalog version here
       List<HdfsPartition> hdfsPartitions = hdfsTable.createAndLoadPartitions(
           msClient.getHiveClient(), partitions);
       for (HdfsPartition hdfsPartition : hdfsPartitions) {
         catalog_.addPartition(hdfsPartition);
       }
+      return hdfsPartitions;
     }
-    return hdfsTable;
   }
 
   /**
@@ -2696,7 +2714,7 @@ public class CatalogOpExecutor {
    * Caching directives are only applied to new partitions that were absent from both the
    * catalog cache and the HMS.
    */
-  private Table alterTableAddPartitions(Table tbl,
+  private List<HdfsPartition> alterTableAddPartitions(Table tbl,
       TAlterTableAddPartitionParams addPartParams) throws ImpalaException {
     Preconditions.checkState(tbl.getLock().isHeldByCurrentThread());
 
@@ -2756,9 +2774,8 @@ public class CatalogOpExecutor {
         addedHmsPartitions.addAll(
             getPartitionsFromHms(msTbl, msClient, tableName, difference));
       }
-      addHdfsPartitions(tbl, addedHmsPartitions);
+      return addHdfsPartitions(tbl, addedHmsPartitions);
     }
-    return tbl;
   }
 
   /**
@@ -2867,7 +2884,7 @@ public class CatalogOpExecutor {
    * permanently deleted. numUpdatedPartitions is used to inform the client how many
    * partitions being dropped in this operation.
    */
-  private Table alterTableDropPartition(Table tbl,
+  private List<HdfsPartition> alterTableDropPartition(Table tbl,
       List<List<TPartitionKeyValue>> partitionSet,
       boolean ifExists, boolean purge, Reference<Long> numUpdatedPartitions)
       throws ImpalaException {
@@ -2881,7 +2898,7 @@ public class CatalogOpExecutor {
       if (partitionSet.isEmpty()) {
         LOG.trace(String.format("Ignoring empty partition list when dropping " +
             "partitions from %s because ifExists is true.", tableName));
-        return tbl;
+        return Collections.EMPTY_LIST;
       }
     }
 
@@ -3430,7 +3447,8 @@ public class CatalogOpExecutor {
    * Recover partitions of specified table.
    * Add partitions to metastore which exist in HDFS but not in metastore.
    */
-  private void alterTableRecoverPartitions(Table tbl) throws ImpalaException {
+  private void alterTableRecoverPartitions(Table tbl)
+      throws ImpalaException {
     Preconditions.checkArgument(tbl.getLock().isHeldByCurrentThread());
     if (!(tbl instanceof HdfsTable)) {
       throw new CatalogException("Table " + tbl.getFullName() + " is not an HDFS table");
