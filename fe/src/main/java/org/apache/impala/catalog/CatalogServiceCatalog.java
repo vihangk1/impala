@@ -2093,7 +2093,8 @@ public class CatalogServiceCatalog extends Catalog {
    * Drops the partitions specified in 'partitionSet' from 'tbl'. Throws a
    * CatalogException if 'tbl' is not an HdfsTable. Returns the target table.
    */
-  public Table dropPartitions(Table tbl, List<List<TPartitionKeyValue>> partitionSet)
+  public List<HdfsPartition> dropPartitions(Table tbl,
+      List<List<TPartitionKeyValue>> partitionSet)
       throws CatalogException {
     Preconditions.checkNotNull(tbl);
     Preconditions.checkNotNull(partitionSet);
@@ -2105,7 +2106,7 @@ public class CatalogServiceCatalog extends Catalog {
     List<HdfsPartition> partitions =
         hdfsTable.getPartitionsFromPartitionSet(partitionSet);
     hdfsTable.dropPartitions(partitions);
-    return hdfsTable;
+    return partitions;
   }
 
   /**
@@ -2972,6 +2973,7 @@ public class CatalogServiceCatalog extends Catalog {
         return createGetPartialCatalogObjectError(CatalogLookupStatus.TABLE_NOT_LOADED);
       }
       // TODO(todd): consider a read-write lock here.
+      //TODO(Vihang) do we need to use tryLock() here?
       table.getLock().lock();
       try {
         return table.getPartialInfo(req);
