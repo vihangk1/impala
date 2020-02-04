@@ -22,6 +22,7 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.common.FileSystemUtil;
@@ -168,7 +169,6 @@ public interface FeFsPartition extends FePartition {
    * -1 means write Id is undefined.
    */
   long getWriteId();
-
 
   LoadResult load(PartitionLoadArgs loadArgs) throws PartitionLoadingException;
 }

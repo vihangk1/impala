@@ -31,9 +31,17 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.Nonnull;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hive.common.ValidTxnList;
+import org.apache.hadoop.hive.common.ValidWriteIdList;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.PartitionKeyValue;
@@ -43,13 +51,27 @@ import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
+import org.apache.impala.compat.HdfsShim;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbCompression;
 import org.apache.impala.fb.FbFileBlock;
 import org.apache.impala.fb.FbFileDesc;
-import org.apache.impala.thrift.*;
+import org.apache.impala.thrift.CatalogObjectsConstants;
+import org.apache.impala.thrift.TAccessLevel;
+import org.apache.impala.thrift.TCatalogObject;
+import org.apache.impala.thrift.TCatalogObjectType;
+import org.apache.impala.thrift.TExpr;
+import org.apache.impala.thrift.TExprNode;
+import org.apache.impala.thrift.THdfsFileDesc;
+import org.apache.impala.thrift.THdfsPartition;
+import org.apache.impala.thrift.THdfsPartitionLocation;
+import org.apache.impala.thrift.TNetworkAddress;
+import org.apache.impala.thrift.TPartitionStats;
+import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.ListMap;
+import org.apache.impala.util.ThreadNameAnnotator;
+import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,7 +95,8 @@ import com.google.flatbuffers.FlatBufferBuilder;
  * order with NULLs sorting last. The ordering is useful for displaying partitions
  * in SHOW statements.
  */
-public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, PrunablePartition {
+public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition,
+    PrunablePartition {
   /**
    * Metadata for a single file in this partition.
    */
@@ -489,6 +512,21 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
     }
   }
 
+  public static class PartitionLoadCtx {
+    private final ValidWriteIdList writeIdList_;
+    private final ValidTxnList validTxnList_;
+    private final boolean recursive_;
+    private final boolean forceRefreshLocations_;
+
+    public PartitionLoadCtx(ValidWriteIdList writeIdList_,
+        ValidTxnList validTxnList_, boolean recursive_, boolean forceRefreshLocations_) {
+      this.writeIdList_ = writeIdList_;
+      this.validTxnList_ = validTxnList_;
+      this.recursive_ = recursive_;
+      this.forceRefreshLocations_ = forceRefreshLocations_;
+    }
+  }
+
   // Struct-style class for caching all the information we need to reconstruct an
   // HMS-compatible Partition object, for use in RPCs to the metastore. We do this rather
   // than cache the Thrift partition object itself as the latter can be large - thanks
@@ -547,6 +585,8 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
   }
 
   private final static Logger LOG = LoggerFactory.getLogger(HdfsPartition.class);
+  private static final Configuration CONF = new Configuration();
+
 
   // A predicate for checking if a given string is a key used for serializing
   // TPartitionStats to HMS parameters.
@@ -560,7 +600,7 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
       };
 
   private final HdfsTable table_;
-  private final List<LiteralExpr> partitionKeyValues_;
+  private final ImmutableList<LiteralExpr> partitionKeyValues_;
   // estimated number of rows in partition; -1: unknown
   private long numRows_ = -1;
   private static AtomicLong partitionIdCounter_ = new AtomicLong();
@@ -1160,5 +1200,4 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
     }
     return result;
   }
-
 }

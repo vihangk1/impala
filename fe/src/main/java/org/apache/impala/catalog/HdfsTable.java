@@ -576,6 +576,7 @@ public class HdfsTable extends Table implements FeFsTable {
     return clock.getTick() - startTime;
   }
 
+
   /**
    * Loads valid txn list from HMS. Re-throws exceptions as CatalogException.
    */
