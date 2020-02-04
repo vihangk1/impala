@@ -31,9 +31,17 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.Nonnull;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hive.common.ValidTxnList;
+import org.apache.hadoop.hive.common.ValidWriteIdList;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.PartitionKeyValue;
@@ -43,13 +51,27 @@ import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
+import org.apache.impala.compat.HdfsShim;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbCompression;
 import org.apache.impala.fb.FbFileBlock;
 import org.apache.impala.fb.FbFileDesc;
-import org.apache.impala.thrift.*;
+import org.apache.impala.thrift.CatalogObjectsConstants;
+import org.apache.impala.thrift.TAccessLevel;
+import org.apache.impala.thrift.TCatalogObject;
+import org.apache.impala.thrift.TCatalogObjectType;
+import org.apache.impala.thrift.TExpr;
+import org.apache.impala.thrift.TExprNode;
+import org.apache.impala.thrift.THdfsFileDesc;
+import org.apache.impala.thrift.THdfsPartition;
+import org.apache.impala.thrift.THdfsPartitionLocation;
+import org.apache.impala.thrift.TNetworkAddress;
+import org.apache.impala.thrift.TPartitionStats;
+import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.ListMap;
+import org.apache.impala.util.ThreadNameAnnotator;
+import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,7 +95,8 @@ import com.google.flatbuffers.FlatBufferBuilder;
  * order with NULLs sorting last. The ordering is useful for displaying partitions
  * in SHOW statements.
  */
-public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, PrunablePartition {
+public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition,
+    PrunablePartition {
   /**
    * Metadata for a single file in this partition.
    */
@@ -489,6 +512,21 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
     }
   }
 
+  public static class PartitionLoadCtx {
+    private final ValidWriteIdList writeIdList_;
+    private final ValidTxnList validTxnList_;
+    private final boolean recursive_;
+    private final boolean forceRefreshLocations_;
+
+    public PartitionLoadCtx(ValidWriteIdList writeIdList_,
+        ValidTxnList validTxnList_, boolean recursive_, boolean forceRefreshLocations_) {
+      this.writeIdList_ = writeIdList_;
+      this.validTxnList_ = validTxnList_;
+      this.recursive_ = recursive_;
+      this.forceRefreshLocations_ = forceRefreshLocations_;
+    }
+  }
+
   // Struct-style class for caching all the information we need to reconstruct an
   // HMS-compatible Partition object, for use in RPCs to the metastore. We do this rather
   // than cache the Thrift partition object itself as the latter can be large - thanks
@@ -547,6 +585,8 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
   }
 
   private final static Logger LOG = LoggerFactory.getLogger(HdfsPartition.class);
+  private static final Configuration CONF = new Configuration();
+
 
   // A predicate for checking if a given string is a key used for serializing
   // TPartitionStats to HMS parameters.
@@ -560,7 +600,7 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
       };
 
   private final HdfsTable table_;
-  private final List<LiteralExpr> partitionKeyValues_;
+  private final ImmutableList<LiteralExpr> partitionKeyValues_;
   // estimated number of rows in partition; -1: unknown
   private long numRows_ = -1;
   private static AtomicLong partitionIdCounter_ = new AtomicLong();
@@ -1131,5 +1171,179 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition, P
   @Override
   public long getWriteId() {
     return writeId_;
+  }
+
+  @Override
+  public void load(boolean reuseHMSMetadata, IMetaStoreClient client,
+      Partition msPartition, String reason) throws PartitionLoadingException {
+    //TODO(Vihang) implement this
+  }
+
+
+  // File/Block metadata loading stats for a single HDFS path.
+  public class LoadStats {
+    /** Number of files skipped because they pertain to an uncommitted ACID transaction */
+    public int uncommittedAcidFilesSkipped = 0;
+
+    /**
+     * Number of files skipped because they pertain to ACID directories superceded
+     * by later base data.
+     */
+    public int filesSupercededByNewerBase = 0;
+
+    // Number of files for which the metadata was loaded.
+    public int loadedFiles = 0;
+
+    // Number of hidden files excluded from file metadata loading. More details at
+    // isValidDataFile().
+    public int hiddenFiles = 0;
+
+    // Number of files skipped from file metadata loading because the files have not
+    // changed since the last load. More details at hasFileChanged().
+    //
+    // TODO(todd) rename this to something indicating it was fast-pathed, not skipped
+    public int skippedFiles = 0;
+
+    // Number of unknown disk IDs encountered while loading block
+    // metadata for this path.
+    public int unknownDiskIds = 0;
+
+    public final Path pathDir;
+
+    public LoadStats(Path pathDir) {
+      this.pathDir = Preconditions.checkNotNull(pathDir);
+    }
+
+    public String debugString() {
+      return Objects.toStringHelper("")
+          .add("path", pathDir)
+          .add("loaded files", loadedFiles)
+          .add("hidden files", nullIfZero(hiddenFiles))
+          .add("skipped files", nullIfZero(skippedFiles))
+          .add("uncommited files", nullIfZero(uncommittedAcidFilesSkipped))
+          .add("superceded files", nullIfZero(filesSupercededByNewerBase))
+          .add("unknown diskIds", nullIfZero(unknownDiskIds))
+          .omitNullValues()
+          .toString();
+    }
+
+    private Integer nullIfZero(int x) {
+      return x > 0 ? x : null;
+    }
+  }
+
+
+  /**
+   * Compares the modification time and file size between the FileDescriptor and the
+   * FileStatus to determine if the file has changed. Returns true if the file has changed
+   * and false otherwise.
+   */
+  private static boolean hasFileChanged(FileDescriptor fd, FileStatus status) {
+    return (fd == null) || (fd.getFileLength() != status.getLen()) ||
+        (fd.getModificationTime() != status.getModificationTime());
+  }
+
+  /**
+   * Create a FileDescriptor for the given FileStatus. If the FS supports block locations,
+   * and FileStatus is a LocatedFileStatus (i.e. the location was prefetched) this uses
+   * the already-loaded information; otherwise, this may have to remotely look up the
+   * locations.
+   */
+  private FileDescriptor createFd(FileSystem fs, FileStatus fileStatus,
+      String relPath, Reference<Long> numUnknownDiskIds) throws IOException {
+    if (!FileSystemUtil.supportsStorageIds(fs)) {
+      return FileDescriptor.createWithNoBlocks(fileStatus, relPath);
+    }
+    BlockLocation[] locations;
+    if (fileStatus instanceof LocatedFileStatus) {
+      locations = ((LocatedFileStatus)fileStatus).getBlockLocations();
+    } else {
+      locations = fs.getFileBlockLocations(fileStatus, 0, fileStatus.getLen());
+    }
+    return FileDescriptor.create(fileStatus, relPath, locations, table_.getHostIndex(),
+        HdfsShim.isErasureCoded(fileStatus), numUnknownDiskIds);
+  }
+
+  /**
+   * Load the file descriptors.
+   *
+   * If the directory does not exist, this succeeds and yields an empty list of
+   * descriptors.
+   *
+   * @throws IOException if listing fails.
+   */
+  public LoadStats loadFileMetadata(PartitionLoadCtx loadCtx) throws IOException {
+    Path partDir = FileSystemUtil.createFullyQualifiedPath(new Path(getLocation()));
+    FileSystem fs = partDir.getFileSystem(CONF);
+    LoadStats loadStats = new LoadStats(partDir);
+    Map<String, FileDescriptor> oldFdsByRelPath =
+        Maps.uniqueIndex(getFileDescriptors(), FileDescriptor::getRelativePath);
+    // If we don't have any prior FDs from which we could re-use old block location info,
+    // we'll need to fetch info for every returned file. In this case we can inline
+    // that request with the 'list' call and save a round-trip per file.
+    //
+    // In the case that we _do_ have existing FDs which we can reuse, we'll optimistically
+    // assume that most _can_ be reused, in which case it's faster to _not_ prefetch
+    // the locations.
+    boolean listWithLocations = FileSystemUtil.supportsStorageIds(fs) &&
+        (getFileDescriptors().isEmpty() || loadCtx.forceRefreshLocations_);
+
+    String msg = String.format("%s file metadata%s from path %s",
+        oldFdsByRelPath.isEmpty() ? "Loading" : "Refreshing",
+        listWithLocations ? " with eager location-fetching" : "",
+        partDir);
+    LOG.trace(msg);
+    try (ThreadNameAnnotator tna = new ThreadNameAnnotator(msg)) {
+      RemoteIterator<? extends FileStatus> fileStatuses;
+      if (listWithLocations) {
+        fileStatuses = FileSystemUtil.listFiles(fs, partDir, loadCtx.recursive_);
+      } else {
+        fileStatuses = FileSystemUtil.listStatus(fs, partDir, loadCtx.recursive_);
+
+        // TODO(todd): we could look at the result of listing without locations, and if
+        // we see that a substantial number of the files have changed, it may be better
+        // to go back and re-list with locations vs doing an RPC per file.
+      }
+      List<FileDescriptor> loadedFds = new ArrayList<>();
+      if (fileStatuses == null) return loadStats;
+
+      Reference<Long> numUnknownDiskIds = new Reference<Long>(Long.valueOf(0));
+
+      List<FileStatus> stats = new ArrayList<>();
+      while (fileStatuses.hasNext()) {
+        stats.add(fileStatuses.next());
+      }
+
+      if (loadCtx.writeIdList_ != null) {
+        stats = AcidUtils.filterFilesForAcidState(stats, partDir, loadCtx.validTxnList_,
+            loadCtx.writeIdList_, loadStats);
+      }
+
+      for (FileStatus fileStatus : stats) {
+        if (fileStatus.isDirectory()) {
+          continue;
+        }
+
+        if (!FileSystemUtil.isValidDataFile(fileStatus)) {
+          ++loadStats.hiddenFiles;
+          continue;
+        }
+        String relPath = FileSystemUtil.relativizePath(fileStatus.getPath(), partDir);
+        FileDescriptor fd = oldFdsByRelPath.get(relPath);
+        if (listWithLocations || loadCtx.forceRefreshLocations_ ||
+            hasFileChanged(fd, fileStatus)) {
+          fd = createFd(fs, fileStatus, relPath, numUnknownDiskIds);
+          ++loadStats.loadedFiles;
+        } else {
+          ++loadStats.skippedFiles;
+        }
+        loadedFds.add(Preconditions.checkNotNull(fd));;
+      }
+      loadStats.unknownDiskIds += numUnknownDiskIds.getRef();
+      if (LOG.isTraceEnabled()) {
+        LOG.trace(loadStats.debugString());
+      }
+    }
+    return loadStats;
   }
 }

@@ -22,6 +22,7 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.common.FileSystemUtil;
@@ -169,4 +170,11 @@ public interface FeFsPartition extends FePartition {
    */
   long getWriteId();
 
+  /**
+   * Populate members of 'this' from metastore info. If 'reuseHMSMetadata' is true, reuse
+   * valid existing metadata.
+   */
+  void load(boolean reuseHMSMetadata, IMetaStoreClient client,
+      org.apache.hadoop.hive.metastore.api.Partition msPartition, String reason)
+      throws PartitionLoadingException;
 }
