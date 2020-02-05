@@ -17,13 +17,13 @@
 
 package org.apache.impala.catalog;
 
-public class PartitionLoadException extends CatalogException {
+public class PartitionLoadingException extends CatalogException {
 
-  public PartitionLoadException(String msg, Throwable cause) {
+  public PartitionLoadingException(String msg, Throwable cause) {
     super(msg, cause);
   }
 
-  public PartitionLoadException(String msg) {
+  public PartitionLoadingException(String msg) {
     super(msg);
   }
 }

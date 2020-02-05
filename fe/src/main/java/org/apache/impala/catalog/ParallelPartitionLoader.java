@@ -44,9 +44,9 @@ import com.google.common.util.concurrent.MoreExecutors;
  * be loaded, this avoids creating any extra threads and uses the current thread
  * instead.
  */
-public class ParallelFileMetadataLoader {
+public class ParallelPartitionLoader {
   private final static Logger LOG = LoggerFactory.getLogger(
-      ParallelFileMetadataLoader.class);
+      ParallelPartitionLoader.class);
 
   private static final int MAX_HDFS_PARTITIONS_PARALLEL_LOAD =
       BackendConfig.INSTANCE.maxHdfsPartsParallelLoad();
@@ -57,18 +57,20 @@ public class ParallelFileMetadataLoader {
   private static final int MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG = 100;
 
   private final String logPrefix_;
-  private List<FileMetadataLoader> loaders_;
+  private List<HdfsPartition> partitionsToLoad_;
+  private final PartitionLoadArgs partitionLoadArgs_;
   private final FileSystem fs_;
 
   /**
    * @param logPrefix informational prefix for log messages
    * @param fs the filesystem to load from (used to determine appropriate parallelism)
-   * @param loaders the metadata loaders to execute in parallel.
+   * @param partitions the metadata loaders to execute in parallel.
    */
-  public ParallelFileMetadataLoader(String logPrefix, FileSystem fs,
-      Collection<FileMetadataLoader> loaders) {
+  public ParallelPartitionLoader(String logPrefix, FileSystem fs,
+      Collection<HdfsPartition> partitions, PartitionLoadArgs loadArgs) {
     logPrefix_ = logPrefix;
-    loaders_ = ImmutableList.copyOf(loaders);
+    partitionsToLoad_ = ImmutableList.copyOf(partitions);
+    partitionLoadArgs_ = loadArgs;
 
     // TODO(todd) in actuality, different partitions could be on different file systems.
     // We probably should create one pool per filesystem type, and size each of those
@@ -83,14 +85,14 @@ public class ParallelFileMetadataLoader {
    * before any exception is thrown.
    */
   void load() throws TableLoadingException {
-    if (loaders_.isEmpty()) return;
+    if (partitionsToLoad_.isEmpty()) return;
 
     int failedLoadTasks = 0;
     ExecutorService pool = createPool();
     try (ThreadNameAnnotator tna = new ThreadNameAnnotator(logPrefix_)) {
-      List<Future<Void>> futures = new ArrayList<>(loaders_.size());
-      for (FileMetadataLoader loader : loaders_) {
-        futures.add(pool.submit(() -> { loader.load(); return null; }));
+      List<Future<Void>> futures = new ArrayList<>(partitionsToLoad_.size());
+      for (HdfsPartition loader : partitionsToLoad_) {
+        futures.add(pool.submit(() -> { loader.load(partitionLoadArgs_); return null; }));
       }
 
       // Wait for the loaders to finish.
@@ -100,7 +102,7 @@ public class ParallelFileMetadataLoader {
         } catch (ExecutionException | InterruptedException e) {
           if (++failedLoadTasks <= MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG) {
             LOG.error(logPrefix_ + " encountered an error loading data for path " +
-                loaders_.get(i).getPartDir(), e);
+                partitionsToLoad_.get(i).getPartitionName(), e);
           }
         }
       }
@@ -131,7 +133,7 @@ public class ParallelFileMetadataLoader {
    * (HADOOP-14558) on both the server and the client side.
    */
   private ExecutorService createPool() {
-    int numLoaders = loaders_.size();
+    int numLoaders = partitionsToLoad_.size();
     Preconditions.checkState(numLoaders > 0);
     int poolSize = FileSystemUtil.supportsStorageIds(fs_) ?
         MAX_HDFS_PARTITIONS_PARALLEL_LOAD : MAX_NON_HDFS_PARTITIONS_PARALLEL_LOAD;

@@ -24,7 +24,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
-import org.apache.impala.catalog.HdfsPartition.LoadStats;
+import org.apache.impala.catalog.LoadStats;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.thrift.TQueryOptions;
 import org.apache.impala.thrift.TTransactionalType;

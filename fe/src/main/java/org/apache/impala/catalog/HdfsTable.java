@@ -58,7 +58,6 @@ import org.apache.impala.analysis.NumericLiteral;
 import org.apache.impala.analysis.PartitionKeyValue;
 import org.apache.impala.catalog.HdfsPartition.FileBlock;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
-import org.apache.impala.catalog.HdfsPartition.LoadArgs;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
@@ -610,9 +609,9 @@ public class HdfsTable extends Table implements FeFsTable {
     // which might lead to FileNotFound exceptions.
     ValidTxnList validTxnList = writeIds != null ? loadValidTxns(client) : null;
 
-    LoadArgs loadArgs = new LoadArgs(
+    PartitionLoadArgs loadArgs = new PartitionLoadArgs(
         Utils.shouldRecursivelyListPartitions(this),
-        writeIds, validTxnList);
+        validTxnList, writeIds);
     String logPrefix = String.format(
         "%s file and block metadata for %s paths for table %s",
         isRefresh ? "Refreshing" : "Loading", parts.size(),
