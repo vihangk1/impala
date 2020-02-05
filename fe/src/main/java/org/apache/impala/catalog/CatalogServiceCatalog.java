@@ -1731,17 +1731,16 @@ public class CatalogServiceCatalog extends Catalog {
 
   /**
    * Adds table with the given db and table name to the catalog if it does not exists.
-   * @return true if the table was successfully added and false if the table already
-   * exists
-   * @throws CatalogException if the db is not found
+   * @return true if the table was successfully added and false if the db does not
+   * exist or the table already exists.
+   *
    */
-  public boolean addTableIfNotExists(String dbName, String tblName)
-      throws CatalogException {
+  public boolean addTableIfNotExists(String dbName, String tblName) {
     versionLock_.writeLock().lock();
     try {
       Db db = getDb(dbName);
       if (db == null) {
-        throw new CatalogException(String.format("Db %s does not exist", dbName));
+        return false;
       }
       Table existingTable = db.getTable(tblName);
       if (existingTable != null) return false;

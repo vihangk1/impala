@@ -33,7 +33,7 @@ class EventProcessorUtils(object):
   @staticmethod
   def wait_for_event_processing(test_suite, timeout=10):
       """Waits till the event processor has synced to the latest event id from metastore
-         or the timeout value in seconds whichever is earlier"""
+         or the timeout value in seconds whichever is earlier."""
       success = False
       assert timeout > 0
       assert test_suite.hive_client is not None

@@ -28,6 +28,7 @@ from tests.common.test_dimensions import ALL_NODES_ONLY
 from tests.common.test_dimensions import create_exec_option_dimension
 from tests.common.test_dimensions import create_uncompressed_text_dimension
 from tests.util.filesystem_utils import get_fs_path
+from tests.util.event_processor_utils import EventProcessorUtils
 
 # TODO: For these tests to pass, all table metadata must be created exhaustively.
 # the tests should be modified to remove that requirement.
@@ -171,7 +172,9 @@ class TestMetadataQueryStatements(ImpalaTestSuite):
                            "with dbproperties('pi' = '3.14', 'e' = '2.82')")
       if cluster_properties.is_event_polling_enabled():
         # Using HMS event processor - wait until the database shows up.
-        self.wait_for_db_to_appear("hive_test_desc_db", timeout_s=30)
+        assert EventProcessorUtils.get_event_processor_status == "ACTIVE"
+        EventProcessorUtils.wait_for_event_processing(self.hive_client)
+        self.confirm_db_exists("hive_test_desc_db")
       else:
         # Invalidate metadata to pick up hive-created db.
         self.client.execute("invalidate metadata")
