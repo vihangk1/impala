@@ -174,4 +174,6 @@ public interface FeFsPartition {
    */
   long getWriteId();
 
+
+  LoadResult load(PartitionLoadArgs loadArgs) throws PartitionLoadingException;
 }

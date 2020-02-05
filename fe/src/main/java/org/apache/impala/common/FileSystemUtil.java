@@ -36,6 +36,7 @@ import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.client.HdfsAdmin;
 import org.apache.hadoop.hdfs.protocol.EncryptionZone;
 import org.apache.impala.catalog.HdfsCompression;
+import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,6 +109,15 @@ public class FileSystemUtil {
     return z1.equals(z2);
   }
 
+  /**
+   * Compares the modification time and file size between the FileDescriptor and the
+   * FileStatus to determine if the file has changed. Returns true if the file has changed
+   * and false otherwise.
+   */
+  public static boolean hasFileChanged(FileDescriptor fd, FileStatus status) {
+    return (fd == null) || (fd.getFileLength() != status.getLen()) ||
+        (fd.getModificationTime() != status.getModificationTime());
+  }
   /**
    * Relocates all visible (non-hidden) files from a source directory to a destination
    * directory. Files are moved (renamed) to the new location unless the source and

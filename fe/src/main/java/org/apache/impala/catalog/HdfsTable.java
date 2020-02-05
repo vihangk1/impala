@@ -58,6 +58,7 @@ import org.apache.impala.analysis.NumericLiteral;
 import org.apache.impala.analysis.PartitionKeyValue;
 import org.apache.impala.catalog.HdfsPartition.FileBlock;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
+import org.apache.impala.catalog.HdfsPartition.LoadArgs;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
@@ -105,7 +106,6 @@ import com.google.common.collect.HashMultiset;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
 import com.google.common.collect.Multiset;
 import com.google.common.collect.Sets;
 
@@ -596,17 +596,9 @@ public class HdfsTable extends Table implements FeFsTable {
    * affects logging.
    */
   private void loadFileMetadataForPartitions(IMetaStoreClient client,
-      Iterable<HdfsPartition> parts, boolean isRefresh) throws CatalogException {
+      Collection<HdfsPartition> parts, boolean isRefresh) throws CatalogException {
     final Clock clock = Clock.defaultClock();
     long startTime = clock.getTick();
-    // Group the partitions by their path (multiple partitions may point to the same
-    // path).
-    Map<Path, List<HdfsPartition>> partsByPath = Maps.newHashMap();
-    for (HdfsPartition p : parts) {
-      Path partPath = FileSystemUtil.createFullyQualifiedPath(new Path(p.getLocation()));
-      partsByPath.computeIfAbsent(partPath, (path) -> new ArrayList<HdfsPartition>())
-          .add(p);
-    }
 
     ValidWriteIdList writeIds = validWriteIds_ != null
         ? MetastoreShim.getValidWriteIdListFromString(validWriteIds_) : null;
@@ -618,25 +610,12 @@ public class HdfsTable extends Table implements FeFsTable {
     // which might lead to FileNotFound exceptions.
     ValidTxnList validTxnList = writeIds != null ? loadValidTxns(client) : null;
 
-    // Create a FileMetadataLoader for each path.
-    Map<Path, FileMetadataLoader> loadersByPath = Maps.newHashMap();
-    for (Map.Entry<Path, List<HdfsPartition>> e : partsByPath.entrySet()) {
-      List<FileDescriptor> oldFds = e.getValue().get(0).getFileDescriptors();
-      FileMetadataLoader loader = new FileMetadataLoader(e.getKey(),
-          Utils.shouldRecursivelyListPartitions(this),
-          oldFds, hostIndex_, validTxnList, writeIds);
-      // If there is a cached partition mapped to this path, we recompute the block
-      // locations even if the underlying files have not changed.
-      // This is done to keep the cached block metadata up to date.
-      boolean hasCachedPartition = Iterables.any(e.getValue(),
-          HdfsPartition::isMarkedCached);
-      loader.setForceRefreshBlockLocations(hasCachedPartition);
-      loadersByPath.put(e.getKey(), loader);
-    }
-
+    LoadArgs loadArgs = new LoadArgs(
+        Utils.shouldRecursivelyListPartitions(this),
+        writeIds, validTxnList);
     String logPrefix = String.format(
         "%s file and block metadata for %s paths for table %s",
-        isRefresh ? "Refreshing" : "Loading", partsByPath.size(),
+        isRefresh ? "Refreshing" : "Loading", parts.size(),
         getFullName());
     FileSystem tableFs;
     try {
@@ -650,18 +629,8 @@ public class HdfsTable extends Table implements FeFsTable {
     // we'll throw an exception here and end up bailing out of whatever catalog operation
     // we're in the middle of. This could cause a partial metadata update -- eg we may
     // have refreshed the top-level table properties without refreshing the files.
-    new ParallelFileMetadataLoader(logPrefix, tableFs, loadersByPath.values())
+    new ParallelPartitionLoader(logPrefix, tableFs, parts, loadArgs)
         .load();
-
-    // Store the loaded FDs into the partitions.
-    for (Map.Entry<Path, List<HdfsPartition>> e : partsByPath.entrySet()) {
-      Path p = e.getKey();
-      FileMetadataLoader loader = loadersByPath.get(p);
-
-      for (HdfsPartition part : e.getValue()) {
-        part.setFileDescriptors(loader.getLoadedFds());
-      }
-    }
 
     // TODO(todd): would be good to log a summary of the loading process:
     // - how many block locations did we reuse/load individually/load via batch
@@ -669,7 +638,7 @@ public class HdfsTable extends Table implements FeFsTable {
     // - etc...
     String partNames = Joiner.on(", ").join(
         Iterables.limit(Iterables.transform(parts, HdfsPartition::getPartitionName), 3));
-    if (partsByPath.size() > 3) {
+    if (parts.size() > 3) {
       partNames += String.format(", and %s others",
           Iterables.size(parts) - 3);
     }
