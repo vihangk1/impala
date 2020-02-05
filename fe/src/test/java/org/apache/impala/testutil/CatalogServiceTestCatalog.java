@@ -23,6 +23,7 @@ import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.authorization.NoopAuthorizationFactory.NoopAuthorizationManager;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.MetaStoreClientPool;
+import org.apache.impala.catalog.events.NoOpEventProcessor;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.service.FeSupport;
@@ -37,7 +38,7 @@ import java.util.UUID;
  * for testing.
  */
 public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
-  public CatalogServiceTestCatalog(boolean loadInBackground, int numLoadingThreads,
+  private CatalogServiceTestCatalog(boolean loadInBackground, int numLoadingThreads,
       TUniqueId catalogServiceId, MetaStoreClientPool metaStoreClientPool)
       throws ImpalaException {
     super(loadInBackground, numLoadingThreads, catalogServiceId,
@@ -51,7 +52,9 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
   }
 
   public static CatalogServiceCatalog create() {
-    return createWithAuth(new NoopAuthorizationFactory());
+    CatalogServiceCatalog catalog = createWithAuth(new NoopAuthorizationFactory());
+    catalog.setMetastoreEventProcessor(NoOpEventProcessor.getInstance());
+    return catalog;
   }
 
   /**
@@ -68,6 +71,7 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
       cs = new CatalogServiceTestCatalog(false, 16, new TUniqueId(),
           new MetaStoreClientPool(0, 0));
       cs.setAuthzManager(authzFactory.newAuthorizationManager(cs));
+      cs.setMetastoreEventProcessor(NoOpEventProcessor.getInstance());
       cs.reset();
     } catch (ImpalaException e) {
       throw new IllegalStateException(e.getMessage(), e);
@@ -91,6 +95,7 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
     CatalogServiceCatalog cs = new CatalogServiceTestCatalog(false, 16,
         new TUniqueId(), new EmbeddedMetastoreClientPool(0, derbyPath));
     cs.setAuthzManager(new NoopAuthorizationManager());
+    cs.setMetastoreEventProcessor(NoOpEventProcessor.getInstance());
     cs.reset();
     return cs;
   }

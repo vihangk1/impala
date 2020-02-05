@@ -193,7 +193,7 @@ public class MetastoreEventsProcessorTest {
       CurrentNotificationEventId currentNotificationId =
           metaStoreClient.getHiveClient().getCurrentNotificationEventId();
       eventsProcessor_ = new SynchronousHMSEventProcessorForTests(
-          catalog_, currentNotificationId.getEventId(), 10L);
+          catalogOpExecutor_, currentNotificationId.getEventId(), 10L);
       eventsProcessor_.start();
     }
     catalog_.setMetastoreEventProcessor(eventsProcessor_);
@@ -627,6 +627,17 @@ public class MetastoreEventsProcessorTest {
     assertTrue("Newly created table should be instance of IncompleteTable",
         catalog_.getTable(TEST_DB_NAME, testPartitionedTbl)
                 instanceof IncompleteTable);
+
+    // Test create table on a drop database event.
+    dropDatabaseCascadeFromImpala(TEST_DB_NAME);
+    assertNull("Database not expected to exist.", catalog_.getDb(TEST_DB_NAME));
+    createDatabaseFromImpala(TEST_DB_NAME, null);
+    eventsProcessor_.processEvents();
+    createTable("createondroppeddb", false);
+    dropDatabaseCascadeFromImpala(TEST_DB_NAME);
+    eventsProcessor_.processEvents();
+    assertEquals(EventProcessorStatus.ACTIVE, eventsProcessor_.getStatus());
+
   }
 
   /**
@@ -1269,9 +1280,9 @@ public class MetastoreEventsProcessorTest {
   private static class HMSFetchNotificationsEventProcessor
       extends MetastoreEventsProcessor {
     HMSFetchNotificationsEventProcessor(
-        CatalogServiceCatalog catalog, long startSyncFromId, long pollingFrequencyInSec)
+        CatalogOpExecutor catalogOp, long startSyncFromId, long pollingFrequencyInSec)
         throws CatalogException {
-      super(catalog, startSyncFromId, pollingFrequencyInSec);
+      super(catalogOp, startSyncFromId, pollingFrequencyInSec);
     }
 
     @Override
@@ -1290,9 +1301,13 @@ public class MetastoreEventsProcessorTest {
    * Tests event processor is active after HMS restarts.
    */
   @Test
-  public void testEventProcessorFetchAfterHMSRestart() throws CatalogException {
+  public void testEventProcessorFetchAfterHMSRestart() throws ImpalaException {
+    CatalogServiceCatalog catalog = CatalogServiceTestCatalog.create();
+    CatalogOpExecutor catalogOpExecutor = new CatalogOpExecutor(catalog,
+        new NoopAuthorizationFactory().getAuthorizationConfig(),
+        new NoopAuthorizationManager());
     MetastoreEventsProcessor fetchProcessor =
-        new HMSFetchNotificationsEventProcessor(CatalogServiceTestCatalog.create(),
+        new HMSFetchNotificationsEventProcessor(catalogOpExecutor,
             eventsProcessor_.getCurrentEventId(), 2L);
     fetchProcessor.start();
     try {
@@ -1658,6 +1673,7 @@ public class MetastoreEventsProcessorTest {
         cs = new FakeCatalogServiceCatalogForFlagTests(false, 16, new TUniqueId(),
             System.getProperty("java.io.tmpdir"), new MetaStoreClientPool(0, 0));
         cs.setAuthzManager(new NoopAuthorizationManager());
+        cs.setMetastoreEventProcessor(NoOpEventProcessor.getInstance());
         cs.reset();
       } catch (ImpalaException e) {
         throw new IllegalStateException(e.getMessage(), e);

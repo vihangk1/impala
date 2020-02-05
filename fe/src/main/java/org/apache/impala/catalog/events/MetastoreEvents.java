@@ -31,6 +31,7 @@ import java.util.Objects;
 import java.util.Map;
 
 import org.apache.hadoop.hive.metastore.api.Database;
+import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -50,16 +51,20 @@ import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.HdfsTable;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.Table;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.TableNotFoundException;
 import org.apache.impala.catalog.TableNotLoadedException;
+import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.common.Metrics;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
+import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TPartitionKeyValue;
 import org.apache.impala.thrift.TTableName;
 import org.apache.impala.util.AcidUtils;
+import org.apache.thrift.TException;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
@@ -146,9 +151,12 @@ public class MetastoreEvents {
     private final CatalogServiceCatalog catalog_;
     // metrics registry to be made available for each events to publish metrics
     private final Metrics metrics_;
+    // catalogOpExecutor needed for the create/drop events for table and database.
+    private final CatalogOpExecutor catalogOpExecutor_;
 
-    public MetastoreEventFactory(CatalogServiceCatalog catalog, Metrics metrics) {
-      this.catalog_ = Preconditions.checkNotNull(catalog);
+    public MetastoreEventFactory(CatalogOpExecutor catalogOpExecutor, Metrics metrics) {
+      this.catalogOpExecutor_ = Preconditions.checkNotNull(catalogOpExecutor);
+      this.catalog_ = Preconditions.checkNotNull(catalogOpExecutor.getCatalog());
       this.metrics_ = Preconditions.checkNotNull(metrics);
     }
 
@@ -162,11 +170,16 @@ public class MetastoreEvents {
       MetastoreEventType metastoreEventType =
           MetastoreEventType.from(event.getEventType());
       switch (metastoreEventType) {
-        case CREATE_TABLE: return new CreateTableEvent(catalog_, metrics_, event);
-        case DROP_TABLE: return new DropTableEvent(catalog_, metrics_, event);
-        case ALTER_TABLE: return new AlterTableEvent(catalog_, metrics_, event);
-        case CREATE_DATABASE: return new CreateDatabaseEvent(catalog_, metrics_, event);
-        case DROP_DATABASE: return new DropDatabaseEvent(catalog_, metrics_, event);
+        case CREATE_TABLE:
+          return new CreateTableEvent(catalogOpExecutor_, metrics_, event);
+        case DROP_TABLE:
+          return new DropTableEvent(catalogOpExecutor_, metrics_, event);
+        case ALTER_TABLE:
+          return new AlterTableEvent(catalog_, metrics_, event);
+        case CREATE_DATABASE:
+          return new CreateDatabaseEvent(catalogOpExecutor_, metrics_, event);
+        case DROP_DATABASE:
+          return new DropDatabaseEvent(catalogOpExecutor_, metrics_, event);
         case ALTER_DATABASE: return new AlterDatabaseEvent(catalog_, metrics_, event);
         case ADD_PARTITION: return new AddPartitionEvent(catalog_, metrics_, event);
         case DROP_PARTITION: return new DropPartitionEvent(catalog_, metrics_, event);
@@ -567,11 +580,19 @@ public class MetastoreEvents {
               getFullyQualifiedTblName());
           return false;
         }
-      } catch (DatabaseNotFoundException e) {
-        debugLog("Refresh table {} failed as "
-                + "the database was not present in the catalog.",
-            getFullyQualifiedTblName());
-        return false;
+      } catch (CatalogException e) {
+        if (e instanceof TableLoadingException
+            || e instanceof DatabaseNotFoundException) {
+          // there could be many reasons for receiving a tableLoading exception,
+          // eg. table doesn't exist in HMS anymore or table schema is not supported
+          // or Kudu threw an exception due to some internal error. There is not much
+          // we can do here other than log it appropriately.
+          debugLog("Refresh table {} failed due to error {}",
+              getFullyQualifiedTblName(), e.getMessage(), e);
+          return false;
+        } else {
+          throw e;
+        }
       }
       String tblStr = isTransactional ? "transactional table" : "table";
       infoLog("Refreshed {} {}", tblStr, getFullyQualifiedTblName());
@@ -646,12 +667,14 @@ public class MetastoreEvents {
    * MetastoreEvent for CREATE_TABLE event type
    */
   public static class CreateTableEvent extends MetastoreTableEvent {
+    private final CatalogOpExecutor catalogOpExecutor_;
     /**
      * Prevent instantiation from outside should use MetastoreEventFactory instead
      */
-    private CreateTableEvent(CatalogServiceCatalog catalog, Metrics metrics,
+    private CreateTableEvent(CatalogOpExecutor catalogOpExecutor, Metrics metrics,
         NotificationEvent event) throws MetastoreNotificationException {
-      super(catalog, metrics, event);
+      super(catalogOpExecutor.getCatalog(), metrics, event);
+      catalogOpExecutor_ = catalogOpExecutor;
       Preconditions.checkArgument(MetastoreEventType.CREATE_TABLE.equals(eventType_));
       Preconditions
           .checkNotNull(event.getMessage(), debugString("Event message is null"));
@@ -686,7 +709,7 @@ public class MetastoreEvents {
       // a self-event (see description of self-event in the class documentation of
       // MetastoreEventsProcessor)
       try {
-        if (!catalog_.addTableIfNotExists(dbName_, tblName_)) {
+        if (!catalogOpExecutor_.addTableIfNotExists(dbName_, tblName_)) {
           debugLog(
               "Not adding the table {} since it already exists in catalog", tblName_);
           return;
@@ -830,21 +853,12 @@ public class MetastoreEvents {
       // For non-partitioned tables, refresh the whole table.
       Preconditions.checkArgument(insertPartition_ == null);
       try {
-        // Ignore event if table or database is not in the catalog. Throw exception if
-        // refresh fails.
         reloadTableFromCatalog("INSERT", false);
       } catch (CatalogException e) {
-        if (e instanceof TableLoadingException &&
-            e.getCause() instanceof NoSuchObjectException) {
-          LOG.warn(
-              "Ignoring the refresh of the table since the table does"
-                  + " not exist in metastore anymore");
-        } else {
-          throw new MetastoreNotificationNeedsInvalidateException(
-              debugString("Refresh table {} failed. Event processing "
-                  + "cannot continue. Issue an invalidate metadata command to reset "
-                  + "the event processor state.", getFullyQualifiedTblName()), e);
-        }
+        throw new MetastoreNotificationNeedsInvalidateException(
+            debugString("Refresh table {} failed. Event processing "
+                + "cannot continue. Issue an invalidate metadata command to reset "
+                + "the event processor state.", getFullyQualifiedTblName()), e);
       }
     }
   }
@@ -1032,13 +1046,15 @@ public class MetastoreEvents {
    * MetastoreEvent for the DROP_TABLE event type
    */
   public static class DropTableEvent extends MetastoreTableEvent {
+    private final CatalogOpExecutor catalogOpExecutor_;
 
     /**
      * Prevent instantiation from outside should use MetastoreEventFactory instead
      */
-    private DropTableEvent(CatalogServiceCatalog catalog, Metrics metrics,
+    private DropTableEvent(CatalogOpExecutor catalogOpExecutor, Metrics metrics,
         NotificationEvent event) throws MetastoreNotificationException {
-      super(catalog, metrics, event);
+      super(catalogOpExecutor.getCatalog(), metrics, event);
+      catalogOpExecutor_ = catalogOpExecutor;
       Preconditions.checkArgument(MetastoreEventType.DROP_TABLE.equals(eventType_));
       JSONDropTableMessage dropTableMessage =
           (JSONDropTableMessage) MetastoreEventsProcessor.getMessageDeserializer()
@@ -1072,14 +1088,20 @@ public class MetastoreEvents {
      * not a huge problem since the tables will eventually be created when the
      * create events are processed but there will be a non-zero amount of time when the
      * table will not be existing in catalog.
-     * TODO : Once HIVE-21595 is available we should rely on table_id for determining a
-     * newer incarnation of a previous table.
      */
     @Override
-    public void process() {
+    public void process() throws MetastoreNotificationException {
       Reference<Boolean> tblWasFound = new Reference<>();
       Reference<Boolean> tblMatched = new Reference<>();
-      Table removedTable = catalog_.removeTableIfExists(msTbl_, tblWasFound, tblMatched);
+      Table removedTable;
+      try {
+        removedTable = catalogOpExecutor_
+            .removeTableIfExists(msTbl_, tblWasFound, tblMatched);
+      } catch (ImpalaRuntimeException e) {
+        throw new MetastoreNotificationException(
+            debugString("Could not uniquely determine if the table "
+                    + "in catalog matches with the table in the event"));
+      }
       if (removedTable != null) {
         infoLog("Removed table {} ", getFullyQualifiedTblName());
       } else if (!tblWasFound.getRef()) {
@@ -1101,12 +1123,15 @@ public class MetastoreEvents {
     // metastore database object as parsed from NotificationEvent message
     private final Database createdDatabase_;
 
+    private final CatalogOpExecutor catalogOpExecutor_;
+
     /**
      * Prevent instantiation from outside should use MetastoreEventFactory instead
      */
-    private CreateDatabaseEvent(CatalogServiceCatalog catalog, Metrics metrics,
+    private CreateDatabaseEvent(CatalogOpExecutor catalogOpExecutor, Metrics metrics,
         NotificationEvent event) throws MetastoreNotificationException {
-      super(catalog, metrics, event);
+      super(catalogOpExecutor.getCatalog(), metrics, event);
+      catalogOpExecutor_ = catalogOpExecutor;
       Preconditions.checkArgument(MetastoreEventType.CREATE_DATABASE.equals(eventType_));
       JSONCreateDatabaseMessage createDatabaseMessage =
           (JSONCreateDatabaseMessage) MetastoreEventsProcessor.getMessageDeserializer()
@@ -1140,7 +1165,7 @@ public class MetastoreEvents {
       // existing at the time of creation. In such case, it is safe to assume that the
       // already existing database in catalog is a later version with the same name and
       // this event can be ignored
-      if (catalog_.addDbIfNotExists(dbName_, createdDatabase_)) {
+      if (catalogOpExecutor_.addDbIfNotExists(dbName_, createdDatabase_)) {
         infoLog("Successfully added database {}", dbName_);
       } else {
         infoLog("Database {} already exists", dbName_);
@@ -1195,7 +1220,7 @@ public class MetastoreEvents {
      * the Db object from the event
      */
     @Override
-    public void process() throws CatalogException, MetastoreNotificationException {
+    public void process() throws CatalogException {
       if (isSelfEvent()) {
         infoLog("Not processing the event as it is a self-event");
         return;
@@ -1226,13 +1251,15 @@ public class MetastoreEvents {
     // Metastore database object as parsed from NotificationEvent message
     private final Database droppedDatabase_;
 
+    private final CatalogOpExecutor catalogOpExecutor_;
     /**
      * Prevent instantiation from outside should use MetastoreEventFactory instead
      */
     private DropDatabaseEvent(
-        CatalogServiceCatalog catalog, Metrics metrics, NotificationEvent event)
+        CatalogOpExecutor catalogOpExecutor, Metrics metrics, NotificationEvent event)
         throws MetastoreNotificationException {
-      super(catalog, metrics, event);
+      super(catalogOpExecutor.getCatalog(), metrics, event);
+      catalogOpExecutor_ = catalogOpExecutor;
       Preconditions.checkArgument(MetastoreEventType.DROP_DATABASE.equals(eventType_));
       JSONDropDatabaseMessage dropDatabaseMessage =
           (JSONDropDatabaseMessage) MetastoreEventsProcessor.getMessageDeserializer()
@@ -1278,7 +1305,7 @@ public class MetastoreEvents {
     public void process() {
       Reference<Boolean> dbFound = new Reference<>();
       Reference<Boolean> dbMatched = new Reference<>();
-      Db removedDb = catalog_.removeDbIfExists(droppedDatabase_, dbFound, dbMatched);
+      Db removedDb = catalogOpExecutor_.removeDbIfExists(droppedDatabase_, dbFound, dbMatched);
       if (removedDb != null) {
         infoLog("Removed Database {} ", dbName_);
       } else if (!dbFound.getRef()) {
