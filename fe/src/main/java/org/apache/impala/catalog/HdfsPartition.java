@@ -31,9 +31,13 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import javax.annotation.Nonnull;
 
+import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.PartitionKeyValue;
@@ -43,6 +47,7 @@ import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
+import org.apache.impala.compat.HdfsShim;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbCompression;
 import org.apache.impala.fb.FbFileBlock;
@@ -56,8 +61,10 @@ import org.apache.impala.thrift.THdfsPartition;
 import org.apache.impala.thrift.THdfsPartitionLocation;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TPartitionStats;
+import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.ListMap;
+import org.apache.impala.util.ThreadNameAnnotator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1117,4 +1124,176 @@ public class HdfsPartition implements FeFsPartition, PrunablePartition {
   public long getWriteId() {
     return writeId_;
   }
+
+  // File/Block metadata loading stats for a single HDFS path.
+  public class LoadStats {
+    private final Path partDir_;
+    LoadStats(Path partDir) {
+      this.partDir_ = partDir;
+    }
+    /** Number of files skipped because they pertain to an uncommitted ACID transaction */
+    public int uncommittedAcidFilesSkipped = 0;
+
+    /**
+     * Number of files skipped because they pertain to ACID directories superceded
+     * by later base data.
+     */
+    public int filesSupercededByNewerBase = 0;
+
+    // Number of files for which the metadata was loaded.
+    public int loadedFiles = 0;
+
+    // Number of hidden files excluded from file metadata loading. More details at
+    // isValidDataFile().
+    public int hiddenFiles = 0;
+
+    // Number of files skipped from file metadata loading because the files have not
+    // changed since the last load. More details at hasFileChanged().
+    //
+    // TODO(todd) rename this to something indicating it was fast-pathed, not skipped
+    public int skippedFiles = 0;
+
+    // Number of unknown disk IDs encountered while loading block
+    // metadata for this path.
+    public int unknownDiskIds = 0;
+
+    public String debugString() {
+      return Objects.toStringHelper("")
+          .add("path", partDir_)
+          .add("loaded files", loadedFiles)
+          .add("hidden files", nullIfZero(hiddenFiles))
+          .add("skipped files", nullIfZero(skippedFiles))
+          .add("uncommited files", nullIfZero(uncommittedAcidFilesSkipped))
+          .add("superceded files", nullIfZero(filesSupercededByNewerBase))
+          .add("unknown diskIds", nullIfZero(unknownDiskIds))
+          .omitNullValues()
+          .toString();
+    }
+
+    private Integer nullIfZero(int x) {
+      return x > 0 ? x : null;
+    }
+  }
+
+  /**
+   * Create a FileDescriptor for the given FileStatus. If the FS supports block locations,
+   * and FileStatus is a LocatedFileStatus (i.e. the location was prefetched) this uses
+   * the already-loaded information; otherwise, this may have to remotely look up the
+   * locations.
+   */
+  private FileDescriptor createFd(FileSystem fs, FileStatus fileStatus,
+      String relPath, Reference<Long> numUnknownDiskIds)
+      throws IOException {
+    if (!FileSystemUtil.supportsStorageIds(fs)) {
+      return FileDescriptor.createWithNoBlocks(fileStatus, relPath);
+    }
+    BlockLocation[] locations;
+    if (fileStatus instanceof LocatedFileStatus) {
+      locations = ((LocatedFileStatus) fileStatus).getBlockLocations();
+    } else {
+      locations = fs.getFileBlockLocations(fileStatus, 0, fileStatus.getLen());
+    }
+    return FileDescriptor
+        .create(fileStatus, relPath, locations, getTable().getHostIndex(),
+            HdfsShim.isErasureCoded(fileStatus), numUnknownDiskIds);
+  }
+
+  private static final Configuration CONF = new Configuration();
+
+  @Override
+  public LoadResult load(PartitionLoadArgs loadArgs) throws PartitionLoadingException {
+    //TODO(Vihang) do we need a check for state here?
+    //Preconditions.checkState(loadStats_ == null, "already loaded");
+    //TODO(Vihang) make this threadsafe?
+    final Path partDir_ =
+        FileSystemUtil.createFullyQualifiedPath(new Path(getLocation()));
+    LoadStats loadStats = new LoadStats(partDir_);
+    LoadResult result = new LoadResult(loadStats);
+    FileSystem fs;
+    try {
+      fs = partDir_.getFileSystem(CONF);
+
+      // If we don't have any prior FDs from which we could re-use old block location info,
+      // we'll need to fetch info for every returned file. In this case we can inline
+      // that request with the 'list' call and save a round-trip per file.
+      //
+      // In the case that we _do_ have existing FDs which we can reuse, we'll optimistically
+      // assume that most _can_ be reused, in which case it's faster to _not_ prefetch
+      // the locations.
+      ImmutableMap<String, FileDescriptor> oldFds =
+          Maps.uniqueIndex(getFileDescriptors(), FileDescriptor::getRelativePath);
+
+      // If there is a cached partition mapped to this path, we recompute the block
+      // locations even if the underlying files have not changed.
+      // This is done to keep the cached block metadata up to date.
+      boolean forceRefresh = isMarkedCached_;
+      boolean listWithLocations = FileSystemUtil.supportsStorageIds(fs) &&
+          (oldFds.isEmpty() || forceRefresh);
+
+      String msg = String.format("%s file metadata%s from path %s",
+          oldFds.isEmpty() ? "Loading" : "Refreshing",
+          listWithLocations ? " with eager location-fetching" : "",
+          partDir_);
+      LOG.trace(msg);
+      List<FileDescriptor> loadedFds = new ArrayList<>();
+      try (ThreadNameAnnotator tna = new ThreadNameAnnotator(msg)) {
+        RemoteIterator<? extends FileStatus> fileStatuses;
+        if (listWithLocations) {
+          fileStatuses = FileSystemUtil.listFiles(fs, partDir_, loadArgs.isRecursive());
+        } else {
+          fileStatuses = FileSystemUtil.listStatus(fs, partDir_, loadArgs.isRecursive());
+          // TODO(todd): we could look at the result of listing without locations, and if
+          // we see that a substantial number of the files have changed, it may be better
+          // to go back and re-list with locations vs doing an RPC per file.
+        }
+        if (fileStatuses == null) {
+          return result;
+        }
+
+        Reference<Long> numUnknownDiskIds = new Reference<Long>(Long.valueOf(0));
+
+        List<FileStatus> stats = new ArrayList<>();
+        while (fileStatuses.hasNext()) {
+          stats.add(fileStatuses.next());
+        }
+
+        if (loadArgs.getValidWriteIdList() != null) {
+          stats = AcidUtils
+              .filterFilesForAcidState(stats, partDir_, loadArgs.getValidTxnList(),
+                  loadArgs.getValidWriteIdList(), loadStats);
+        }
+
+        for (FileStatus fileStatus : stats) {
+          if (fileStatus.isDirectory()) {
+            continue;
+          }
+
+          if (!FileSystemUtil.isValidDataFile(fileStatus)) {
+            ++loadStats.hiddenFiles;
+            continue;
+          }
+          String relPath = FileSystemUtil.relativizePath(fileStatus.getPath(), partDir_);
+          FileDescriptor fd = oldFds.get(relPath);
+          if (listWithLocations || forceRefresh ||
+              FileSystemUtil.hasFileChanged(fd, fileStatus)) {
+            fd = createFd(fs, fileStatus, relPath, numUnknownDiskIds);
+            ++loadStats.loadedFiles;
+          } else {
+            ++loadStats.skippedFiles;
+          }
+          loadedFds.add(Preconditions.checkNotNull(fd));
+        }
+        loadStats.unknownDiskIds += numUnknownDiskIds.getRef();
+        if (LOG.isTraceEnabled()) {
+          LOG.trace(loadStats.debugString());
+        }
+      }
+      setFileDescriptors(loadedFds);
+    } catch (IOException e) {
+      throw new PartitionLoadingException(
+          "Could not list files for the partition " + partDir_, e);
+    }
+    return result;
+  }
+
 }

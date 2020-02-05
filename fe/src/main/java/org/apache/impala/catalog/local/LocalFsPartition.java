@@ -32,6 +32,9 @@ import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.catalog.HdfsStorageDescriptor;
 import org.apache.impala.catalog.HdfsStorageDescriptor.InvalidStorageDescriptorException;
+import org.apache.impala.catalog.LoadResult;
+import org.apache.impala.catalog.PartitionLoadArgs;
+import org.apache.impala.catalog.PartitionLoadingException;
 import org.apache.impala.catalog.PartitionStatsUtil;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.compat.MetastoreShim;
@@ -223,5 +226,10 @@ public class LocalFsPartition implements FeFsPartition {
   @Override
   public long getWriteId() {
     return MetastoreShim.getWriteIdFromMSPartition(msPartition_);
+  }
+
+  @Override
+  public LoadResult load(PartitionLoadArgs loadArgs) throws PartitionLoadingException {
+    throw new UnsupportedOperationException();
   }
 }

@@ -225,7 +225,7 @@ public class TableLoadingMgr {
   }
 
   /**
-   * Loads a table asynchronously, returning a LoadRequest that can be used to get
+   * Loads a table asynchronously, returning a LoadArgs that can be used to get
    * the result (a Table). If there is already a load in flight for this table name,
    * the same underlying loading task (Future) will be used, helping to prevent duplicate
    * loads of the same table.
