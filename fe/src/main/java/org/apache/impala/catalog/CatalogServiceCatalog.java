@@ -829,7 +829,11 @@ public class CatalogServiceCatalog extends Catalog {
     long versionNumber = ctx.getVersionNumberFromEvent();
     String serviceIdFromEvent = ctx.getServiceIdFromEvent();
     // no version info or service id in the event
-    if (versionNumber == -1 || serviceIdFromEvent.isEmpty()) return false;
+    if (versionNumber == -1 || serviceIdFromEvent.isEmpty()) {
+      LOG.debug("Not a self-event since the given version is {} and service id is {}",
+          versionNumber, serviceIdFromEvent);
+      return false;
+    }
     // if the service id from event doesn't match with our service id this is not a
     // self-event
     if (!getCatalogServiceId().equals(serviceIdFromEvent)) return false;
@@ -839,9 +843,19 @@ public class CatalogServiceCatalog extends Catalog {
     }
     // if the given tblName is null we look db's in-flight events
     if (ctx.getTblName() == null) {
-      return db.removeFromVersionsForInflightEvents(versionNumber);
+      versionLock_.writeLock().lock();
+      try {
+        boolean removed = db.removeFromVersionsForInflightEvents(versionNumber);
+        if (!removed) {
+          LOG.debug("Could not find version {} in the in-flight event list of database "
+                  + "{}", versionNumber, db.getName());
+        }
+        return removed;
+      } finally {
+        versionLock_.writeLock().unlock();
+      }
     }
-    Table tbl = getTable(ctx.getDbName(), ctx.getTblName());
+    Table tbl = db.getTable(ctx.getTblName());
     if (tbl == null) {
       throw new TableNotFoundException(
           String.format("Table %s.%s not found", ctx.getDbName(), ctx.getTblName()));
@@ -857,7 +871,12 @@ public class CatalogServiceCatalog extends Catalog {
       List<List<TPartitionKeyValue>> partitionKeyValues = ctx.getPartitionKeyValues();
       // if the partitionKeyValues is null, we look for tbl's in-flight events
       if (partitionKeyValues == null) {
-        return tbl.removeFromVersionsForInflightEvents(versionNumber);
+        boolean removed = tbl.removeFromVersionsForInflightEvents(versionNumber);
+        if (!removed) {
+          LOG.debug("Could not find version {} in in-flight event list of table {}",
+              versionNumber, tbl.getFullName());
+        }
+        return removed;
       }
       if (tbl instanceof HdfsTable) {
         List<String> failingPartitions = new ArrayList<>();
@@ -870,8 +889,11 @@ public class CatalogServiceCatalog extends Catalog {
             // should clean up the self-event state on the rest of the partitions
             String partName = HdfsTable.constructPartitionName(partitionKeyValue);
             if (hdfsPartition == null) {
-              LOG.warn(String.format("Partition %s not found during self-event "
-                + "evaluation for the table %s", partName, tbl.getFullName()));
+              LOG.debug("Partition {} not found during self-event "
+                + "evaluation for the table {}", partName, tbl.getFullName());
+            } else {
+              LOG.debug("Could not find {} in in-flight event list of the partition {} "
+                  + "of table {}", versionNumber, partName, tbl.getFullName());
             }
             failingPartitions.add(partName);
           }
