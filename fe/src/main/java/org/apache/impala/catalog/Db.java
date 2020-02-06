@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+import java.util.concurrent.locks.ReentrantLock;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.impala.analysis.ColumnDef;
 import org.apache.impala.analysis.KuduPartitionParam;
@@ -100,6 +101,10 @@ public class Db extends CatalogObjectImpl implements FeDb {
   // tracks the in-flight metastore events for this db
   private final InFlightEvents inFlightEvents_ = new InFlightEvents();
 
+  // lock to make sure modifications to the Db object are atomically done along with
+  // its associated HMS operation (eg. alterDbOwner or commentOnDb)
+  private final ReentrantLock dbLock_ = new ReentrantLock();
+
   public Db(String name, org.apache.hadoop.hive.metastore.api.Database msDb) {
     setMetastoreDb(name, msDb);
     tableCache_ = new CatalogObjectCache<>();
@@ -138,6 +143,8 @@ public class Db extends CatalogObjectImpl implements FeDb {
     if (msDb.getParameters() == null) return false;
     return msDb.getParameters().remove(k) != null;
   }
+
+  public ReentrantLock getLock() { return dbLock_; }
 
   @Override // FeDb
   public boolean isSystemDb() { return isSystemDb_; }

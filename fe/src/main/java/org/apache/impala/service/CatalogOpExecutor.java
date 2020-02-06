@@ -208,21 +208,21 @@ import org.slf4j.LoggerFactory;
  * updates, DDL operations should not directly modify the HMS objects of the catalog
  * objects but should operate on copies instead.
  *
- * The CatalogOpExecutor uses table-level locking to protect table metadata during
- * concurrent modifications and is responsible for assigning a new catalog version when
- * a table is modified (e.g. alterTable()).
+ * The CatalogOpExecutor uses table-level or Db-level locking to protect table metadata
+ * during concurrent modifications and is responsible for assigning a new catalog
+ * version when a table/Db is modified (e.g. alterTable() or alterDb()).
  *
  * The following locking protocol is employed to ensure that modifying
- * the table metadata and assigning a new catalog version is performed atomically and
+ * the table/Db metadata and assigning a new catalog version is performed atomically and
  * consistently in the presence of concurrent DDL operations. The following pattern
  * ensures that the catalog lock is never held for a long period of time, preventing
- * other DDL operations from making progress. This pattern only applies to single-table
+ * other DDL operations from making progress. This pattern only applies to single-table/Db
  * update operations and requires the use of fair table locks to prevent starvation.
  *
  *   DO {
  *     Acquire the catalog lock (see CatalogServiceCatalog.versionLock_)
- *     Try to acquire a table lock
- *     IF the table lock acquisition fails {
+ *     Try to acquire a table/Db lock
+ *     IF the table/Db lock acquisition fails {
  *       Release the catalog lock
  *       YIELD()
  *     ELSE
@@ -233,8 +233,8 @@ import org.slf4j.LoggerFactory;
  *
  *   Increment and get a new catalog version
  *   Release the catalog lock
- *   Modify table metadata
- *   Release table lock
+ *   Modify table/Db metadata
+ *   Release table/Db lock
  *
  * Note: The getCatalogObjects() function is the only case where this locking pattern is
  * not used since it accesses multiple catalog entities in order to compute a snapshot
@@ -4473,14 +4473,16 @@ public class CatalogOpExecutor {
   }
 
   private void alterCommentOnDb(String dbName, String comment, TDdlExecResponse response)
-      throws ImpalaRuntimeException, CatalogException {
+      throws ImpalaRuntimeException, CatalogException, InternalException {
     Db db = catalog_.getDb(dbName);
     if (db == null) {
       throw new CatalogException("Database: " + dbName + " does not exist.");
     }
-    synchronized (metastoreDdlLock_) {
-      // Get a new catalog version to assign to the database being altered.
-      long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
+    tryLock(db, "altering the comment");
+    // Get a new catalog version to assign to the database being altered.
+    long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
+    catalog_.getLock().writeLock().unlock();
+    try {
       addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(), newCatalogVersion);
       Database msDb = db.getMetaStoreDb().deepCopy();
       msDb.setDescription(comment);
@@ -4494,6 +4496,8 @@ public class CatalogOpExecutor {
       // now that HMS alter operation has succeeded, add this version to list of inflight
       // events in catalog database if event processing is enabled
       catalog_.addVersionsForInflightEvents(db, newCatalogVersion);
+    } finally {
+      db.getLock().unlock();
     }
     addSummary(response, "Updated database.");
   }
@@ -4520,9 +4524,11 @@ public class CatalogOpExecutor {
       TDdlExecResponse response) throws ImpalaException {
     Preconditions.checkNotNull(params.owner_name);
     Preconditions.checkNotNull(params.owner_type);
-    synchronized (metastoreDdlLock_) {
-      // Get a new catalog version to assign to the database being altered.
-      long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
+    tryLock(db, "altering the owner");
+    // Get a new catalog version to assign to the database being altered.
+    long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
+    catalog_.getLock().writeLock().unlock();
+    try {
       addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(), newCatalogVersion);
       Database msDb = db.getMetaStoreDb().deepCopy();
       String originalOwnerName = msDb.getOwnerName();
@@ -4544,6 +4550,8 @@ public class CatalogOpExecutor {
       // now that HMS alter operation has succeeded, add this version to list of inflight
       // events in catalog database if event processing is enabled
       catalog_.addVersionsForInflightEvents(db, newCatalogVersion);
+    } finally {
+      db.getLock().unlock();
     }
     addSummary(response, "Updated database.");
   }
@@ -4668,6 +4676,17 @@ public class CatalogOpExecutor {
     if (!catalog_.tryLockTable(tbl)) {
       throw new InternalException(String.format("Error %s (for) %s %s due to " +
           "lock contention.", operation, type, tbl.getFullName()));
+    }
+  }
+
+  /**
+   * Try to lock the given Db in the catalog for the given operation. Throws
+   * InternalException if catalog is unable to lock the database.
+   */
+  private void tryLock(Db db, String operation) throws InternalException {
+    if (!catalog_.tryLockDb(db)) {
+      throw new InternalException(String.format("Error %s of database %s due to lock "
+          + "contention.", operation, db.getName()));
     }
   }
 
