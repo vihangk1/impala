@@ -37,7 +37,7 @@ cd "${IMPALA_HOME}/tests"
 . "${IMPALA_HOME}/bin/set-classpath.sh" &> /dev/null
 
 AUX_CUSTOM_DIR="${IMPALA_AUX_TEST_HOME}/tests/aux_custom_cluster_tests/"
-ARGS=(custom_cluster/ authorization/)
+ARGS=(custom_cluster/test_event_processing.py)
 if [[ -d "${AUX_CUSTOM_DIR}" ]]
 then
   ARGS+=("${AUX_CUSTOM_DIR}")
@@ -46,4 +46,5 @@ ARGS+=("--junitxml=${RESULTS_DIR}/TEST-impala-custom-cluster.xml")
 ARGS+=("--resultlog=${RESULTS_DIR}/TEST-impala-custom-cluster.log")
 ARGS+=("$@")
 
+echo "VIHANG-DEBUG: $ARGS"
 impala-py.test "${ARGS[@]}"
