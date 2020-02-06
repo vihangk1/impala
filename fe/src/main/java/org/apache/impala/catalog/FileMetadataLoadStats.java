@@ -4,11 +4,10 @@ import com.google.common.base.Objects;
 import org.apache.hadoop.fs.Path;
 
 // File/Block metadata loading stats for a single HDFS path.
-public class LoadStats {
-  private final Path partDir_;
-  LoadStats(Path partDir) {
-    this.partDir_ = partDir;
-  }
+public class FileMetadataLoadStats {
+  //TODO(Vihang) change these members to private
+  public Path partDir_;
+
   /** Number of files skipped because they pertain to an uncommitted ACID transaction */
   public int uncommittedAcidFilesSkipped = 0;
 
@@ -50,5 +49,14 @@ public class LoadStats {
 
   private Integer nullIfZero(int x) {
     return x > 0 ? x : null;
+  }
+
+  public void addAll(FileMetadataLoadStats other) {
+    this.uncommittedAcidFilesSkipped += other.uncommittedAcidFilesSkipped;
+    this.filesSupercededByNewerBase += other.filesSupercededByNewerBase;
+    this.loadedFiles += other.loadedFiles;
+    this.hiddenFiles += other.hiddenFiles;
+    this.skippedFiles += other.skippedFiles;
+    this.unknownDiskIds += other.unknownDiskIds;
   }
 }

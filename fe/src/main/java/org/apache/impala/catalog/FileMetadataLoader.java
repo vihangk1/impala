@@ -65,7 +65,7 @@ public class FileMetadataLoader {
   private boolean forceRefreshLocations = false;
 
   private List<FileDescriptor> loadedFds_;
-  private LoadStats loadStats_;
+  private FileMetadataLoadStats loadStats_;
 
   /**
    * @param partDir the dir for which to fetch file metadata
@@ -118,7 +118,7 @@ public class FileMetadataLoader {
    * @return statistics about the descriptor loading process, after an invocation of
    * load()
    */
-  public LoadStats getStats() {
+  public FileMetadataLoadStats getStats() {
     Preconditions.checkState(loadedFds_ != null,
         "Must have successfully loaded first");
     return loadStats_;
@@ -137,7 +137,8 @@ public class FileMetadataLoader {
    */
   public void load() throws IOException {
     Preconditions.checkState(loadStats_ == null, "already loaded");
-    loadStats_ = new LoadStats(partDir_);
+    loadStats_ = new FileMetadataLoadStats();
+    loadStats_.partDir_ = partDir_;
     FileSystem fs = partDir_.getFileSystem(CONF);
 
     // If we don't have any prior FDs from which we could re-use old block location info,

@@ -97,7 +97,7 @@ public class HBaseTable extends Table implements FeHBaseTable {
    * of the file at all.
    */
   @Override
-  public void load(boolean reuseMetadata, IMetaStoreClient client,
+  public LoadResult load(boolean reuseMetadata, IMetaStoreClient client,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException {
     Preconditions.checkNotNull(getMetaStoreTable());
@@ -124,6 +124,7 @@ public class HBaseTable extends Table implements FeHBaseTable {
       numClusteringCols_ = 1;
       loadAllColumnStats(client);
       refreshLastUsedTime();
+      return LoadResult.EMPTY_RESULT;
     } catch (Exception e) {
       throw new TableLoadingException("Failed to load metadata for HBase table: " + name_,
           e);

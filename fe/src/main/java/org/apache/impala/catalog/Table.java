@@ -310,7 +310,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
    * Populate members of 'this' from metastore info. If 'reuseMetadata' is true, reuse
    * valid existing metadata.
    */
-  public abstract void load(boolean reuseMetadata, IMetaStoreClient client,
+  public abstract LoadResult load(boolean reuseMetadata, IMetaStoreClient client,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException;
 

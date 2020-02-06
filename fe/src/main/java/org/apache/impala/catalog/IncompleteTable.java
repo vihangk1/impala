@@ -79,7 +79,7 @@ public class IncompleteTable extends Table implements FeIncompleteTable {
   }
 
   @Override
-  public void load(boolean reuseMetadata, IMetaStoreClient client,
+  public LoadResult load(boolean reuseMetadata, IMetaStoreClient client,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException {
     if (cause_ instanceof TableLoadingException) {

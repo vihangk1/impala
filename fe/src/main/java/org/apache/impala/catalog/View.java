@@ -81,7 +81,7 @@ public class View extends Table implements FeView {
   }
 
   @Override
-  public void load(boolean reuseMetadata, IMetaStoreClient client,
+  public LoadResult load(boolean reuseMetadata, IMetaStoreClient client,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException {
     try {
@@ -101,6 +101,7 @@ public class View extends Table implements FeView {
       tableStats_.setTotal_file_bytes(-1);
       queryStmt_ = parseViewDef(this);
       refreshLastUsedTime();
+      return LoadResult.EMPTY_RESULT;
     } catch (TableLoadingException e) {
       throw e;
     } catch (Exception e) {

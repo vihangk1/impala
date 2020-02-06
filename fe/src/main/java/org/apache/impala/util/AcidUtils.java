@@ -24,9 +24,8 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
-import org.apache.impala.catalog.LoadStats;
+import org.apache.impala.catalog.FileMetadataLoadStats;
 import org.apache.impala.common.FileSystemUtil;
-import org.apache.impala.thrift.TQueryOptions;
 import org.apache.impala.thrift.TTransactionalType;
 
 import java.util.ArrayList;
@@ -246,7 +245,7 @@ public class AcidUtils {
    */
   public static List<FileStatus> filterFilesForAcidState(List<FileStatus> stats,
       Path baseDir, ValidTxnList validTxnList, ValidWriteIdList writeIds,
-      @Nullable LoadStats loadStats) {
+      @Nullable FileMetadataLoadStats loadStats) {
     List<FileStatus> validStats = new ArrayList<>(stats);
 
     // First filter out any paths that are not considered valid write IDs.

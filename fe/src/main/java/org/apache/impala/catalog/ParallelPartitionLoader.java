@@ -16,6 +16,7 @@
 // under the License.
 package org.apache.impala.catalog;
 
+import com.google.common.collect.Lists;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -58,7 +59,9 @@ public class ParallelPartitionLoader {
 
   private final String logPrefix_;
   private List<HdfsPartition> partitionsToLoad_;
+  private List<HdfsPartition> partitionsLoaded_;
   private final PartitionLoadArgs partitionLoadArgs_;
+  private final FileMetadataLoadStats fileMetadataLoadStats_ = new FileMetadataLoadStats();
   private final FileSystem fs_;
 
   /**
@@ -71,6 +74,7 @@ public class ParallelPartitionLoader {
     logPrefix_ = logPrefix;
     partitionsToLoad_ = ImmutableList.copyOf(partitions);
     partitionLoadArgs_ = loadArgs;
+    partitionsLoaded_ = Lists.newArrayListWithExpectedSize(partitions.size());
 
     // TODO(todd) in actuality, different partitions could be on different file systems.
     // We probably should create one pool per filesystem type, and size each of those
@@ -90,15 +94,17 @@ public class ParallelPartitionLoader {
     int failedLoadTasks = 0;
     ExecutorService pool = createPool();
     try (ThreadNameAnnotator tna = new ThreadNameAnnotator(logPrefix_)) {
-      List<Future<Void>> futures = new ArrayList<>(partitionsToLoad_.size());
-      for (HdfsPartition loader : partitionsToLoad_) {
-        futures.add(pool.submit(() -> { loader.load(partitionLoadArgs_); return null; }));
+      List<Future<LoadResult>> futures = new ArrayList<>(partitionsToLoad_.size());
+      for (HdfsPartition partition : partitionsToLoad_) {
+        futures.add(pool.submit(() -> { LoadResult result =
+            partition.load(partitionLoadArgs_); return result; }));
       }
 
       // Wait for the loaders to finish.
       for (int i = 0; i < futures.size(); i++) {
         try {
-          futures.get(i).get();
+          fileMetadataLoadStats_.addAll(futures.get(i).get().getFileMetadataLoadStats());
+          partitionsLoaded_.add(partitionsToLoad_.get(i));
         } catch (ExecutionException | InterruptedException e) {
           if (++failedLoadTasks <= MAX_PATH_METADATA_LOADING_ERRORS_TO_LOG) {
             LOG.error(logPrefix_ + " encountered an error loading data for path " +
@@ -146,5 +152,13 @@ public class ParallelPartitionLoader {
       LOG.info(logPrefix_ + " using a thread pool of size {}", poolSize);
       return Executors.newFixedThreadPool(poolSize);
     }
+  }
+
+  public String getSummary() {
+    return fileMetadataLoadStats_.debugString();
+  }
+
+  public List<HdfsPartition> getPartitionsLoaded() {
+    return partitionsLoaded_;
   }
 }

@@ -34,14 +34,9 @@ import javax.annotation.Nonnull;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.BlockLocation;
 import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
-import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.impala.analysis.Expr;
 import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.PartitionKeyValue;
@@ -51,7 +46,6 @@ import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
-import org.apache.impala.compat.HdfsShim;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.fb.FbCompression;
 import org.apache.impala.fb.FbFileBlock;
@@ -67,11 +61,8 @@ import org.apache.impala.thrift.THdfsPartition;
 import org.apache.impala.thrift.THdfsPartitionLocation;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TPartitionStats;
-import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.ListMap;
-import org.apache.impala.util.ThreadNameAnnotator;
-import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1180,8 +1171,10 @@ public class HdfsPartition extends CatalogObjectImpl implements FeFsPartition,
     //TODO(Vihang) make this threadsafe?
     final Path partDir_ =
         FileSystemUtil.createFullyQualifiedPath(new Path(getLocation()));
-    LoadStats loadStats = new LoadStats(partDir_);
-    LoadResult result = new LoadResult(loadStats);
+    FileMetadataLoadStats fileMetadataLoadStats = new FileMetadataLoadStats();
+    fileMetadataLoadStats.partDir_ = partDir_;
+    LoadResult result = new LoadResult();
+    result.setFileMetadataLoadStats_(fileMetadataLoadStats);
     try {
       FileMetadataLoader fml = new FileMetadataLoader(partDir_, loadArgs.isRecursive(),
           getFileDescriptors(),

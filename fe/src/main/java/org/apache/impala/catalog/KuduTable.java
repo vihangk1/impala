@@ -306,7 +306,7 @@ public class KuduTable extends Table implements FeKuduTable {
    * propagate alterations made to the Kudu table to HMS.
    */
   @Override
-  public void load(boolean dummy /* not used */, IMetaStoreClient msClient,
+  public LoadResult load(boolean dummy /* not used */, IMetaStoreClient msClient,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException {
     final Timer.Context context =
@@ -336,7 +336,7 @@ public class KuduTable extends Table implements FeKuduTable {
       loadAllColumnStats(msClient);
       refreshLastUsedTime();
       // Avoid updating HMS if the schema didn't change.
-      if (msTable_.equals(msTbl)) return;
+      if (msTable_.equals(msTbl)) return LoadResult.EMPTY_RESULT;
 
       // Update the table schema in HMS.
       try {
@@ -347,6 +347,7 @@ public class KuduTable extends Table implements FeKuduTable {
         msTable_.putToParameters(StatsSetupConst.DO_NOT_UPDATE_STATS,
             StatsSetupConst.TRUE);
         msClient.alter_table(msTable_.getDbName(), msTable_.getTableName(), msTable_);
+        return LoadResult.EMPTY_RESULT;
       } catch (TException e) {
         throw new TableLoadingException(e.getMessage());
       }

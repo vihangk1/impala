@@ -170,7 +170,7 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
   }
 
   @Override
-  public void load(boolean reuseMetadata, IMetaStoreClient client,
+  public LoadResult load(boolean reuseMetadata, IMetaStoreClient client,
       org.apache.hadoop.hive.metastore.api.Table msTbl, String reason)
       throws TableLoadingException {
     Preconditions.checkNotNull(msTbl);
@@ -201,6 +201,7 @@ public class DataSourceTable extends Table implements FeDataSourceTable {
       // Set table stats.
       setTableStats(msTable_);
       refreshLastUsedTime();
+      return LoadResult.EMPTY_RESULT;
     } catch (Exception e) {
       throw new TableLoadingException("Failed to load metadata for data source table: " +
           name_, e);
