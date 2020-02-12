@@ -126,6 +126,13 @@ public class FrontendProfile {
     }
   }
 
+  public synchronized long getCurrentCounterVal(String name) {
+    Preconditions.checkState(profile_ != null, "already emitted profile");
+    TCounter counter = countersByName_.get(Preconditions.checkNotNull(name));
+    if (counter == null) return 0;
+    return counter.value;
+  }
+
   /**
    * Add 'delta' to the counter with the given name and unit. Counters are created
    * on-demand.

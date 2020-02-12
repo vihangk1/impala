@@ -50,6 +50,7 @@ import org.apache.hadoop.hive.metastore.api.SQLForeignKey;
 import org.apache.hadoop.hive.metastore.api.SQLPrimaryKey;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hadoop.hive.metastore.api.UnknownDBException;
+import org.apache.impala.analysis.TableName;
 import org.apache.impala.authorization.AuthorizationChecker;
 import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.catalog.AuthzCacheInvalidation;
@@ -234,6 +235,8 @@ public class CatalogdMetaProvider implements MetaProvider {
       CATALOG_FETCH_PREFIX + "." + RPC_STATS_CATEGORY + ".Bytes";
   private static final String RPC_TIME =
       CATALOG_FETCH_PREFIX + "." + RPC_STATS_CATEGORY + ".Time";
+  private static final String FILE_METADATA_RPC_BYTES  =
+      CATALOG_FETCH_PREFIX + "." + RPC_STATS_CATEGORY + ".FileMetadataBytes";
 
   /**
    * File descriptors store replicas using a compressed format that references hosts
@@ -958,6 +961,9 @@ public class CatalogdMetaProvider implements MetaProvider {
   private Map<PartitionRef, ImmutableList<FileDescriptor>> loadFdsFromCatalogd(
       TableMetaRef table, List<PartitionRef> partMetasByRefs,
       ListMap<TNetworkAddress> hostIndex) throws TException, LocalCatalogException {
+    LOG.info("Loading file metadata from catalogd for {} partitions of table {}",
+        partMetasByRefs.size(), new TableName(table.getHmsTable().getDbName(),
+            table.getHmsTable().getTableName()));
     List<Long> ids = Lists.newArrayListWithCapacity(partMetasByRefs.size());
     for (PartitionRef partRef : partMetasByRefs) {
       ids.add(((PartitionRefImpl) partRef).getId());
@@ -966,8 +972,11 @@ public class CatalogdMetaProvider implements MetaProvider {
     TGetPartialCatalogObjectRequest req = newReqForTable(table);
     req.table_info_selector.partition_ids = ids;
     req.table_info_selector.want_partition_files = true;
-
+    long bytesBefore = FrontendProfile.getCurrent().getCurrentCounterVal(RPC_BYTES);
     TGetPartialCatalogObjectResponse resp = sendRequest(req);
+    long bytesAfter = FrontendProfile.getCurrent().getCurrentCounterVal(RPC_BYTES);
+    FrontendProfile.getCurrent().addToCounter(FILE_METADATA_RPC_BYTES, TUnit.BYTES,
+        bytesAfter-bytesBefore);
     checkResponse(resp.table_info != null && resp.table_info.partitions != null,
         req, "missing partition list result");
     checkResponse(resp.table_info.partitions.size() == ids.size(),
