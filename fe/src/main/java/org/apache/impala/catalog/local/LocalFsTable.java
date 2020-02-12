@@ -447,10 +447,6 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
             ": missing expected partition with name '" + spec.getRef().getName() +
             "' (perhaps it was concurrently dropped by another process)");
       }
-      if (!filemetadata.containsKey(spec.getRef())) {
-        LOG.warn("VIHANG-WARN: No file descriptors were returned for partition {} of "
-            + "table {}", spec.getRef().getName(), getFullName());
-      }
       ImmutableList<FileDescriptor> fds = filemetadata.containsKey(spec.getRef()) ?
           filemetadata.get(spec.getRef()) : ImmutableList.of();
       LocalFsPartition part = new LocalFsPartition(this, spec, p.getHmsPartition(),
