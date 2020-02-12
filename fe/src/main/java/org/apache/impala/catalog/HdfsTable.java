@@ -613,6 +613,15 @@ public class HdfsTable extends Table implements FeFsTable {
       Iterable<HdfsPartition> parts, boolean isRefresh, String fullName,
       String validWriteIds, ListMap<TNetworkAddress> hostIndex,
       Map<String, String> tblProperties, String tblLocation) throws CatalogException {
+    boolean skipFileMetadataLoad = BackendConfig.INSTANCE.skipFileMetadataLoading();
+    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.fetchFileMetadataRemotely();
+    // we should allow only one of the flags to be set
+    Preconditions.checkState(skipFileMetadataLoad ^ getFileMetadataRemotely);
+    if (skipFileMetadataLoad) {
+      LOG.info("Skipping file metadata load of {}", fullName);
+    } else {
+      LOG.info("Loading file metadata for {} since remote loading is enabled", fullName);
+    }
     final Clock clock = Clock.defaultClock();
     long startTime = clock.getTick();
     // Group the partitions by their path (multiple partitions may point to the same
