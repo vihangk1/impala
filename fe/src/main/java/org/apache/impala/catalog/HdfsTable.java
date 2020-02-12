@@ -613,10 +613,6 @@ public class HdfsTable extends Table implements FeFsTable {
       Iterable<HdfsPartition> parts, boolean isRefresh, String fullName,
       String validWriteIds, ListMap<TNetworkAddress> hostIndex,
       Map<String, String> tblProperties, String tblLocation) throws CatalogException {
-    if (BackendConfig.INSTANCE.skipFileMetadataLoading()) {
-      LOG.info("Skipping file metadata loading for table " + fullName);
-      return;
-    }
     final Clock clock = Clock.defaultClock();
     long startTime = clock.getTick();
     // Group the partitions by their path (multiple partitions may point to the same
