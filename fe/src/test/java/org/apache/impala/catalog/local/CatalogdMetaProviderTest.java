@@ -115,7 +115,7 @@ public class CatalogdMetaProviderTest {
     CacheStats stats = diffStats();
 
     // Should get no hits on the initial load of partitions.
-    Map<String, PartitionMetadata> partMap = provider_.loadPartitionsByRefs(
+    Map<PartitionRef, PartitionMetadata> partMap = provider_.loadPartitionsByRefs(
         tableRef_, /* partitionColumnNames unused by this impl */null, hostIndex,
         partialRefs);
     assertEquals(partialRefs.size(), partMap.size());
@@ -123,14 +123,14 @@ public class CatalogdMetaProviderTest {
     assertEquals(0, stats.hitCount());
 
     // Load the same partitions again and we should get a hit for each partition.
-    Map<String, PartitionMetadata> partMapHit = provider_.loadPartitionsByRefs(
+    Map<PartitionRef, PartitionMetadata> partMapHit = provider_.loadPartitionsByRefs(
         tableRef_, /* partitionColumnNames unused by this impl */null, hostIndex,
         partialRefs);
     stats = diffStats();
     assertEquals(stats.hitCount(), partMapHit.size());
 
     // Load all of the partitions: we should get some hits and some misses.
-    Map<String, PartitionMetadata> allParts = provider_.loadPartitionsByRefs(
+    Map<PartitionRef, PartitionMetadata> allParts = provider_.loadPartitionsByRefs(
         tableRef_, /* partitionColumnNames unused by this impl */null, hostIndex,
         allRefs);
     assertEquals(allRefs.size(), allParts.size());

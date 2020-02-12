@@ -157,4 +157,5 @@ struct TBackendGflags {
   66: required bool enable_column_masking
 
   67: required bool skip_filemetadata_loading
+  68: required bool get_filemetadata_remotely
 }

@@ -88,6 +88,7 @@ DECLARE_int32(num_check_authorization_threads);
 DECLARE_bool(use_customized_user_groups_mapper_for_ranger);
 DECLARE_bool(enable_column_masking);
 DECLARE_bool(skip_filemetadata_loading);
+DECLARE_bool(get_filemetadata_remotely);
 
 namespace impala {
 
@@ -180,6 +181,7 @@ Status GetThriftBackendGflags(JNIEnv* jni_env, jbyteArray* cfg_bytes) {
       FLAGS_use_customized_user_groups_mapper_for_ranger);
   cfg.__set_enable_column_masking(FLAGS_enable_column_masking);
   cfg.__set_skip_filemetadata_loading(FLAGS_skip_filemetadata_loading);
+  cfg.__set_get_filemetadata_remotely(FLAGS_get_filemetadata_remotely);
   RETURN_IF_ERROR(SerializeThriftMsg(jni_env, &cfg, cfg_bytes));
   return Status::OK();
 }

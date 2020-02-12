@@ -215,6 +215,10 @@ public class BackendConfig {
     return backendCfg_.skip_filemetadata_loading;
   }
 
+  public boolean fetchFileMetadataRemotely() {
+    return backendCfg_.get_filemetadata_remotely;
+  }
+
   // Inits the auth_to_local configuration in the static KerberosName class.
   private static void initAuthToLocal() {
     // If auth_to_local is enabled, we read the configuration hadoop.security.auth_to_local

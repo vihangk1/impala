@@ -175,7 +175,7 @@ class DirectMetaProvider implements MetaProvider {
   }
 
   @Override
-  public Map<String, PartitionMetadata> loadPartitionsByRefs(
+  public Map<PartitionRef, PartitionMetadata> loadPartitionsByRefs(
       TableMetaRef table, List<String> partitionColumnNames,
       ListMap<TNetworkAddress> hostIndex,
       List<PartitionRef> partitionRefs) throws MetaException, TException {
@@ -193,7 +193,7 @@ class DirectMetaProvider implements MetaProvider {
           hostIndex);
     }
 
-    Map<String, PartitionMetadata> ret = Maps.newHashMapWithExpectedSize(
+    Map<PartitionRef, PartitionMetadata> ret = Maps.newHashMapWithExpectedSize(
         partitionRefs.size());
     if (partitionRefs.isEmpty()) return ret;
 
@@ -229,7 +229,8 @@ class DirectMetaProvider implements MetaProvider {
       ImmutableList<FileDescriptor> fds = loadFileMetadata(
           fullTableName, partName, p, hostIndex);
 
-      PartitionMetadata existing = ret.put(partName, new PartitionMetadataImpl(p, fds));
+      PartitionMetadata existing = ret.put(new PartitionRefImpl(partName),
+          new PartitionMetadataImpl(p, fds));
       if (existing != null) {
         throw new MetaException("HMS returned multiple partitions with name " +
             partName);
@@ -241,9 +242,9 @@ class DirectMetaProvider implements MetaProvider {
   }
 
   @Override
-  public Map<PartitionMetadata, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
-      TableMetaRef table, List<PartitionMetadata> partitionMetadatas,
-      ListMap<TNetworkAddress> hostIndex) {
+  public Map<PartitionRef, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
+      TableMetaRef table, Map<PartitionRef, PartitionMetadata> partitionMetadatas,
+      ListMap<TNetworkAddress> hostIndex) throws TException {
     throw new UnsupportedOperationException("Directmetadata provider does not support "
         + "file metadata loading");
   }
@@ -253,7 +254,7 @@ class DirectMetaProvider implements MetaProvider {
    * unpartitioned table, we have to create a fake Partition object which has the
    * metadata of the table.
    */
-  private Map<String, PartitionMetadata> loadUnpartitionedPartition(
+  private Map<PartitionRef, PartitionMetadata> loadUnpartitionedPartition(
       TableMetaRefImpl table, List<PartitionRef> partitionRefs,
       ListMap<TNetworkAddress> hostIndex) throws MetaException {
     //TODO(IMPALA-9042): Remove "throws MetaException"
@@ -266,8 +267,9 @@ class DirectMetaProvider implements MetaProvider {
     String fullName = table.dbName_ + "." + table.tableName_;
     ImmutableList<FileDescriptor> fds = loadFileMetadata(fullName,
         "default",  msPartition, hostIndex);
-    return ImmutableMap.of("", (PartitionMetadata)new PartitionMetadataImpl(
-        msPartition, fds));
+    return ImmutableMap
+        .of(partitionRefs.get(0), (PartitionMetadata) new PartitionMetadataImpl(
+            msPartition, fds));
   }
 
   static Partition msTableToPartition(Table msTable) {

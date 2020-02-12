@@ -30,6 +30,7 @@ import java.util.TreeMap;
 
 import org.apache.avro.Schema;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.local.LocalFs;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
@@ -71,8 +72,12 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class LocalFsTable extends LocalTable implements FeFsTable {
+
+  private static final Logger LOG = LoggerFactory.getLogger(LocalFsTable.class);
   /**
    * Map from partition ID to partition spec.
    *
@@ -411,24 +416,29 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
           getFullName(), id);
       refs.add(Preconditions.checkNotNull(spec.getRef()));
     }
-    Map<String, PartitionMetadata> partsByName;
+    Map<PartitionRef, PartitionMetadata> partsByRef;
     try {
-      partsByName = db_.getCatalog().getMetaProvider().loadPartitionsByRefs(
+      partsByRef = db_.getCatalog().getMetaProvider().loadPartitionsByRefs(
           ref_, getClusteringColumnNames(), hostIndex_, refs);
     } catch (TException e) {
       throw new LocalCatalogException(
           "Could not load partitions for table " + getFullName(), e);
     }
-    Map<PartitionMetadata, ImmutableList<FileDescriptor>> filemetadata =
+    Map<PartitionRef, ImmutableList<FileDescriptor>> filemetadata =
         Maps.newHashMap();
     if (type == ThriftObjectType.FULL) {
-      filemetadata = db_.getCatalog().getMetaProvider().loadPartitionFileMetadata(ref_,
-          Lists.newArrayList(partsByName.values()), hostIndex_);
+      try {
+        filemetadata = db_.getCatalog().getMetaProvider().loadPartitionFileMetadata(ref_,
+            partsByRef, hostIndex_);
+      } catch (TException e) {
+        throw new LocalCatalogException(
+            "Could not load partition file metadata " + getFullName(), e);
+      }
     }
     List<FeFsPartition> ret = Lists.newArrayListWithCapacity(ids.size());
     for (Long id : ids) {
       LocalPartitionSpec spec = partitionSpecs_.get(id);
-      PartitionMetadata p = partsByName.get(spec.getRef().getName());
+      PartitionMetadata p = partsByRef.get(spec.getRef());
       if (p == null) {
         // TODO(todd): concurrent drop partition could result in this error.
         // Should we recover in a more graceful way from such an unexpected event?
@@ -437,9 +447,12 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
             ": missing expected partition with name '" + spec.getRef().getName() +
             "' (perhaps it was concurrently dropped by another process)");
       }
-      //Preconditions.checkState();
-      ImmutableList<FileDescriptor> fds = filemetadata.containsKey(p) ?
-          filemetadata.get(p) : ImmutableList.of();
+      if (!filemetadata.containsKey(spec.getRef())) {
+        LOG.warn("VIHANG-WARN: No file descriptors were returned for partition {} of "
+            + "table {}", spec.getRef().getName(), getFullName());
+      }
+      ImmutableList<FileDescriptor> fds = filemetadata.containsKey(spec.getRef()) ?
+          filemetadata.get(spec.getRef()) : ImmutableList.of();
       LocalFsPartition part = new LocalFsPartition(this, spec, p.getHmsPartition(),
           fds, p.getPartitionStats(), p.hasIncrementalStats());
       ret.add(part);

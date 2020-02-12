@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog.local;
 
+import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.nio.ByteBuffer;
@@ -26,6 +27,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -86,7 +88,6 @@ import org.apache.impala.thrift.TGetPartialCatalogObjectResponse;
 import org.apache.impala.thrift.THdfsFileDesc;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TPartialPartitionInfo;
-import org.apache.impala.thrift.TPartialTableInfo;
 import org.apache.impala.thrift.TTable;
 import org.apache.impala.thrift.TTableInfoSelector;
 import org.apache.impala.thrift.TUniqueId;
@@ -95,12 +96,12 @@ import org.apache.impala.thrift.TUpdateCatalogCacheRequest;
 import org.apache.impala.thrift.TUpdateCatalogCacheResponse;
 import org.apache.impala.util.ListMap;
 import org.apache.impala.util.TByteBuffer;
-import org.apache.parquet.Log;
 import org.apache.thrift.TDeserializer;
 import org.apache.thrift.TException;
 import org.apache.thrift.TSerializer;
 import org.apache.thrift.protocol.TBinaryProtocol;
 import org.ehcache.sizeof.SizeOf;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -832,7 +833,7 @@ public class CatalogdMetaProvider implements MetaProvider {
   }
 
   @Override
-  public Map<String, PartitionMetadata> loadPartitionsByRefs(TableMetaRef table,
+  public Map<PartitionRef, PartitionMetadata> loadPartitionsByRefs(TableMetaRef table,
       List<String> partitionColumnNames,
       ListMap<TNetworkAddress> hostIndex,
       List<PartitionRef> partitionRefs)
@@ -863,79 +864,142 @@ public class CatalogdMetaProvider implements MetaProvider {
     addStatsToProfile(PARTITIONS_STATS_CATEGORY, refToMeta.size(), numMisses, sw);
     LOG.info("Request for partitions of {}: hit {}/{}", table, refToMeta.size(),
         partitionRefs.size());
-
-    // Convert the returned map to be by-name instead of by-ref.
-    Map<String, PartitionMetadata> nameToMeta = Maps.newHashMapWithExpectedSize(
-        refToMeta.size());
-    for (Map.Entry<PartitionRef, PartitionMetadata> e: refToMeta.entrySet()) {
-      nameToMeta.put(e.getKey().getName(), e.getValue());
-    }
-    return nameToMeta;
+    return refToMeta;
   }
 
   @Override
-  public Map<PartitionMetadata, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
-      TableMetaRef table, List<PartitionMetadata> partitionMetadatas,
-      ListMap<TNetworkAddress> hostIndex) {
+  public Map<PartitionRef, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
+      TableMetaRef table, Map<PartitionRef, PartitionMetadata> partMetasByRef,
+      ListMap<TNetworkAddress> hostIndex) throws TException {
     Stopwatch sw = new Stopwatch().start();
     Table hms_table = table.getHmsTable();
     String fullName =
         hms_table.getDbName() + "."
             + hms_table.getTableName();
     try {
-      Preconditions.checkState(partitionMetadatas.size() > 0);
-      Map<PartitionMetadata, FileMetadataLoader> loadersByPath =
-          Maps.newHashMap();
-      FileSystem tableFs;
-      try {
-        tableFs =
-            (new Path(hms_table.getSd().getLocation())).getFileSystem(CONF);
-      } catch (IOException e) {
-        throw new LocalCatalogException("Invalid table path for table: " + fullName, e);
-      }
-      // table is not partitioned
-      if (hms_table.getPartitionKeys() == null || hms_table.getPartitionKeys().isEmpty()) {
-        Path partPath =
-              FileSystemUtil.createFullyQualifiedPath(
-                  new Path(hms_table.getSd().getLocation()));
-          FileMetadataLoader fml = new FileMetadataLoader(partPath,
-              Utils.shouldRecursivelyListPartitions(hms_table.getParameters()),
-              Collections.emptyList(), hostIndex, null, null);
-          loadersByPath.put(partitionMetadatas.get(0), fml);
+      if (BackendConfig.INSTANCE.fetchFileMetadataRemotely()) {
+        // get the filemetadata from the catalog cache
+        return loadFdsFromCatalogd(table, Lists.newArrayList(partMetasByRef.keySet()),
+            hostIndex);
       } else {
-        for (PartitionMetadata p : partitionMetadatas) {
-          Path partPath =
-              FileSystemUtil.createFullyQualifiedPath(
-                  new Path(p.getHmsPartition().getSd().getLocation()));
-          FileMetadataLoader fml = new FileMetadataLoader(partPath,
-              Utils.shouldRecursivelyListPartitions(hms_table.getParameters()),
-              Collections.emptyList(), hostIndex, null, null);
-          loadersByPath.put(p, fml);
-        }
+        // compute the file-metadata by directly looking at filesystem
+        return computePartitionFileMetadata(partMetasByRef, hostIndex, hms_table,
+            fullName);
       }
-
-      String logPrefix = String.format(
-          "[VIHANG-DEBUG] Loading file and block metadata for %s paths for table %s.%s",
-          loadersByPath.size(), hms_table.getDbName(), hms_table.getTableName());
-
-      try {
-        new ParallelFileMetadataLoader(logPrefix, tableFs, loadersByPath.values()).load();
-      } catch (TableLoadingException e) {
-        throw new LocalCatalogException(e.getMessage(), e);
-      }
-      Map<PartitionMetadata, ImmutableList<FileDescriptor>> partitionToFds =
-          Maps.newHashMap();
-      for (PartitionMetadata p : partitionMetadatas) {
-        partitionToFds.put(p, ImmutableList.copyOf(loadersByPath.get(p).getLoadedFds()));
-      }
-      return partitionToFds;
     } finally {
       long timeTaken = sw.stop().elapsed(TimeUnit.NANOSECONDS);
       addTableFileMetadataLoadTimeToProfile(timeTaken);
       LOG.info("Time taken to load file metadata for {} partitions of table {}: {} "
-              + "ms", partitionMetadatas.size(), fullName,
+              + "ms", partMetasByRef.size(), fullName,
           sw.elapsed(TimeUnit.MILLISECONDS));
     }
+  }
+
+  @NotNull
+  private Map<PartitionRef, ImmutableList<FileDescriptor>> computePartitionFileMetadata(
+      Map<PartitionRef, PartitionMetadata> partMetasByRef,
+      ListMap<TNetworkAddress> hostIndex,
+      Table hms_table, String fullName) {
+    Preconditions.checkState(partMetasByRef.size() > 0);
+    Map<PartitionRef, FileMetadataLoader> loadersByName =
+        Maps.newHashMap();
+    FileSystem tableFs;
+    try {
+      tableFs =
+          (new Path(hms_table.getSd().getLocation())).getFileSystem(CONF);
+    } catch (IOException e) {
+      throw new LocalCatalogException("Invalid table path for table: " + fullName, e);
+    }
+    // table is not partitioned
+    if (hms_table.getPartitionKeys() == null || hms_table.getPartitionKeys().isEmpty()) {
+      Preconditions.checkState(partMetasByRef.size() == 1);
+      Path partPath =
+            FileSystemUtil.createFullyQualifiedPath(
+                new Path(hms_table.getSd().getLocation()));
+        FileMetadataLoader fml = new FileMetadataLoader(partPath,
+            Utils.shouldRecursivelyListPartitions(hms_table.getParameters()),
+            Collections.emptyList(), hostIndex, null, null);
+        loadersByName.put(Iterables.getOnlyElement(partMetasByRef.keySet()), fml);
+    } else {
+      for (Entry<PartitionRef, PartitionMetadata> p : partMetasByRef.entrySet()) {
+        Path partPath =
+            FileSystemUtil.createFullyQualifiedPath(
+                new Path(p.getValue().getHmsPartition().getSd().getLocation()));
+        PartitionRef partRef = p.getKey();
+        FileMetadataLoader fml = new FileMetadataLoader(partPath,
+            Utils.shouldRecursivelyListPartitions(hms_table.getParameters()),
+            Collections.emptyList(), hostIndex, null, null);
+        loadersByName.put(partRef, fml);
+      }
+    }
+
+    String logPrefix = String.format(
+        "[VIHANG-DEBUG] Loading file and block metadata for %s paths for table %s.%s",
+        loadersByName.size(), hms_table.getDbName(), hms_table.getTableName());
+
+    try {
+      new ParallelFileMetadataLoader(logPrefix, tableFs, loadersByName.values()).load();
+    } catch (TableLoadingException e) {
+      throw new LocalCatalogException(e.getMessage(), e);
+    }
+    Map<PartitionRef, ImmutableList<FileDescriptor>> partNameToFds =
+        Maps.newHashMap();
+    for (PartitionRef partRef : partMetasByRef.keySet()) {
+      partNameToFds.put(partRef,
+          ImmutableList.copyOf(loadersByName.get(partRef).getLoadedFds()));
+    }
+    return partNameToFds;
+  }
+
+  /**
+   * Load the specified partition filemetadata 'partRefs' from catalogd. The partitions
+   * are made relative to the given 'hostIndex' before being returned.
+   */
+  private Map<PartitionRef, ImmutableList<FileDescriptor>> loadFdsFromCatalogd(
+      TableMetaRef table, List<PartitionRef> partMetasByRefs,
+      ListMap<TNetworkAddress> hostIndex) throws TException, LocalCatalogException {
+    List<Long> ids = Lists.newArrayListWithCapacity(partMetasByRefs.size());
+    for (PartitionRef partRef : partMetasByRefs) {
+      ids.add(((PartitionRefImpl) partRef).getId());
+    }
+
+    TGetPartialCatalogObjectRequest req = newReqForTable(table);
+    req.table_info_selector.partition_ids = ids;
+    req.table_info_selector.want_partition_files = true;
+
+    TGetPartialCatalogObjectResponse resp = sendRequest(req);
+    checkResponse(resp.table_info != null && resp.table_info.partitions != null,
+        req, "missing partition list result");
+    checkResponse(resp.table_info.partitions.size() == ids.size(),
+        req, "returned %d partitions instead of expected %d",
+        resp.table_info.partitions.size(), ids.size());
+    Map<PartitionRef, ImmutableList<FileDescriptor>> ret = new HashMap<>();
+    for (int i = 0; i < ids.size(); i++) {
+      TPartialPartitionInfo part =
+          resp.table_info.partitions.get(i);
+      PartitionRef partRef = partMetasByRefs.get(i);
+      checkResponse(partRef != null, req, "returned unexpected partition id %s",
+          part.id);
+      // Transform the file descriptors to the caller's index.
+      checkResponse(part.file_descriptors != null, req, "missing file descriptors");
+      List<FileDescriptor> fds = Lists.newArrayListWithCapacity(
+          part.file_descriptors.size());
+      for (THdfsFileDesc thriftFd : part.file_descriptors) {
+        FileDescriptor fd = FileDescriptor.fromThrift(thriftFd);
+        // The file descriptors returned via the RPC use host indexes that reference
+        // the 'network_addresses' list in the RPC. However, the caller may have already
+        // loaded some addresses into 'hostIndex'. So, the returned FDs need to be
+        // remapped to point to the caller's 'hostIndex' instead of the list in the
+        // RPC response.
+        fds.add(fd.cloneWithNewHostIndex(resp.table_info.network_addresses, hostIndex));
+      }
+      ImmutableList<FileDescriptor> oldVal = ret.put(partRef, ImmutableList.copyOf(fds));
+      if (oldVal != null) {
+        throw new RuntimeException("catalogd returned partition " + part.id +
+            " multiple times");
+      }
+    }
+    return ret;
   }
 
   /**
