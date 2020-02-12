@@ -315,7 +315,9 @@ DEFINE_bool_hidden(use_customized_user_groups_mapper_for_ranger, false,
 DEFINE_bool(enable_column_masking, true,
     "If false, disable the column masking feature. Defaults to be true.");
 DEFINE_bool(skip_filemetadata_loading, true,
-    "If true, catalogd skips file metadata loading");
+    "If true, catalogd skips file metadata loading and impalad always computes the file-metadata.");
+DEFINE_bool(get_filemetadata_remotely, true,
+    "If true, impalad issues a separate RPC to catalogd to just get the file metadata.");
 
 // ++========================++
 // || Startup flag graveyard ||

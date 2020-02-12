@@ -102,7 +102,7 @@ public interface MetaProvider {
    * If a requested partition does not exist, no exception will be thrown.
    * Instead, the resulting map will contain no entry for that partition.
    */
-  Map<String, PartitionMetadata> loadPartitionsByRefs(TableMetaRef table,
+  Map<PartitionRef, PartitionMetadata> loadPartitionsByRefs(TableMetaRef table,
       List<String> partitionColumnNames, ListMap<TNetworkAddress> hostIndex,
       List<PartitionRef> partitionRefs)
       throws MetaException, TException;
@@ -114,9 +114,9 @@ public interface MetaProvider {
    * @param hostIndex
    * @return
    */
-  Map<PartitionMetadata, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
-      TableMetaRef table, List<PartitionMetadata> partitionMetadatas,
-      ListMap<TNetworkAddress> hostIndex);
+  Map<PartitionRef, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
+      TableMetaRef table, Map<PartitionRef, PartitionMetadata> partitionMetadatas,
+      ListMap<TNetworkAddress> hostIndex) throws TException;
 
   /**
    * Load statistics for the given columns from the given table.
