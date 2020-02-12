@@ -878,7 +878,11 @@ public class CatalogdMetaProvider implements MetaProvider {
         hms_table.getDbName() + "."
             + hms_table.getTableName();
     try {
-      if (BackendConfig.INSTANCE.fetchFileMetadataRemotely()) {
+      boolean skipFileMetadata = BackendConfig.INSTANCE.skipFileMetadataLoading();
+      boolean getFileMetadateRemotely =
+          BackendConfig.INSTANCE.fetchFileMetadataRemotely();
+      Preconditions.checkState(skipFileMetadata ^ getFileMetadateRemotely);
+      if (getFileMetadateRemotely) {
         // get the filemetadata from the catalog cache
         return loadFdsFromCatalogd(table, Lists.newArrayList(partMetasByRef.keySet()),
             hostIndex);
@@ -1024,7 +1028,14 @@ public class CatalogdMetaProvider implements MetaProvider {
     TGetPartialCatalogObjectRequest req = newReqForTable(table);
     req.table_info_selector.partition_ids = ids;
     req.table_info_selector.want_partition_metadata = true;
-    if (BackendConfig.INSTANCE.skipFileMetadataLoading()) {
+    //TODO(vihang): The flags need to be better named and we possibly only need one flag
+    // with multiple possible values such as "skip", "remote", "local"
+    boolean skipFileMetadataLoad = BackendConfig.INSTANCE.skipFileMetadataLoading();
+    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.fetchFileMetadataRemotely();
+    if (skipFileMetadataLoad ^ getFileMetadataRemotely) {
+      // if either of the flags are true, then we skip getting file metadata here
+      // then later on, based on individual values of these flags we either compute
+      // or load the filemetadata from catalogd
       req.table_info_selector.want_partition_files = false;
       req.table_info_selector.want_hms_table = true;
     } else {
