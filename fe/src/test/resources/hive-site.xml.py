@@ -162,6 +162,11 @@ CONFIG.update({
 
 if variant == 'without_hms_config':
   CONFIG.clear()
+  if hive_major_version >= 3:
+    CONFIG.update({
+      'metastore.expression.proxy': 'org.apache.hadoop.hive.metastore.DefaultPartitionExpressionProxy',
+      'metastore.task.threads.always': 'org.apache.hadoop.hive.metastore.events.EventCleanerTask'
+    })
 
 # Database and JDO-related configs:
 db_type = os.environ.get('HMS_DB_TYPE', 'postgres')

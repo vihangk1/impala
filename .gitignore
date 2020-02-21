@@ -17,6 +17,11 @@ bin/impala-config-local.sh
 .cdh
 .cdp
 .pep8
+fe/src/test/resources/hive-site-ranger-auth
+fe/src/test/resources/hive-site-without-hms
+fe/src/test/resources/hive-site_ranger_auth.xml
+fe/src/test/resources/hive-site_without_hms.xml
+
 
 # distcc options
 .impala_compiler_opts*
