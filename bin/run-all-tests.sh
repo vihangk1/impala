@@ -40,16 +40,16 @@ fi
 
 # Parametrized Test Options
 # Run FE Tests
-: ${FE_TEST:=false}
+: ${FE_TEST:=true}
 # Run Backend Tests
-: ${BE_TEST:=false}
+: ${BE_TEST:=true}
 # Run End-to-end Tests
 : ${EE_TEST:=true}
 : ${EE_TEST_FILES:=}
 # Run JDBC Test
-: ${JDBC_TEST:=false}
+: ${JDBC_TEST:=true}
 # Run Cluster Tests
-: ${CLUSTER_TEST:=false}
+: ${CLUSTER_TEST:=true}
 # Extra arguments passed to start-impala-cluster for tests. These do not apply to custom
 # cluster tests.
 : ${TEST_START_CLUSTER_ARGS:=}
@@ -179,6 +179,13 @@ do
     fi
   fi
 
+  # Run some queries using run-workload to verify run-workload has not been broken.
+  if ! run-step "Run test run-workload" test-run-workload.log \
+      "${IMPALA_HOME}/bin/run-workload.py" -w tpch --num_clients=2 --query_names=TPCH-Q1 \
+      --table_format=text/none --exec_options="disable_codegen:False" ${KERB_ARGS}; then
+    TEST_RET_CODE=1
+  fi
+
   if [[ "$FE_TEST" == true ]]; then
     # Run JUnit frontend tests
     # Requires a running impalad cluster because some tests (such as DataErrorTest and
@@ -204,9 +211,11 @@ do
   if [[ "$EE_TEST" == true ]]; then
     # Run end-to-end tests.
     # KERBEROS TODO - this will need to deal with ${KERB_ARGS}
-    while ${IMPALA_HOME}/bin/impala-py.test ${IMPALA_HOME}/tests/custom_cluster/test_event_processing.py -k test_self_events; do echo yes; done
-    #${KERB_ARGS};
-    TEST_RET_CODE=1
+    if ! "${IMPALA_HOME}/tests/run-tests.py" ${COMMON_PYTEST_ARGS} \
+        ${RUN_TESTS_ARGS} ${EE_TEST_FILES}; then
+      #${KERB_ARGS};
+      TEST_RET_CODE=1
+    fi
   fi
 
   if [[ "$JDBC_TEST" == true ]]; then
