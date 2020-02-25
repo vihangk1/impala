@@ -37,7 +37,7 @@ cd "${IMPALA_HOME}/tests"
 . "${IMPALA_HOME}/bin/set-classpath.sh" &> /dev/null
 
 AUX_CUSTOM_DIR="${IMPALA_AUX_TEST_HOME}/tests/aux_custom_cluster_tests/"
-ARGS=(custom_cluster/test_event_processing.py)
+ARGS=(custom_cluster/test_event_processing.py -k test_self_events)
 if [[ -d "${AUX_CUSTOM_DIR}" ]]
 then
   ARGS+=("${AUX_CUSTOM_DIR}")

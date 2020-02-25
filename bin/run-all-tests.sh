@@ -237,18 +237,22 @@ do
     # pollute the directory with too many files, remove what was there
     # before. Also, save the IMPALA_MAX_LOG_FILES value for re-set
     # later.
-    rm -rf "${IMPALA_CUSTOM_CLUSTER_TEST_LOGS_DIR}"
-    mkdir -p "${IMPALA_CUSTOM_CLUSTER_TEST_LOGS_DIR}"
-    IMPALA_MAX_LOG_FILES_SAVE="${IMPALA_MAX_LOG_FILES:-10}"
-    export IMPALA_MAX_LOG_FILES=0
-    # Run the custom-cluster tests after all other tests, since they will restart the
-    # cluster repeatedly and lose state.
-    # TODO: Consider moving in to run-tests.py.
-    if ! "${IMPALA_HOME}/tests/run-custom-cluster-tests.sh" ${COMMON_PYTEST_ARGS} \
-        ${RUN_CUSTOM_CLUSTER_TESTS_ARGS}; then
-      TEST_RET_CODE=1
-    fi
-    export IMPALA_MAX_LOG_FILES="${IMPALA_MAX_LOG_FILES_SAVE}"
+    for i in $(seq 1 500)
+    do
+      rm -rf "${IMPALA_CUSTOM_CLUSTER_TEST_LOGS_DIR}"
+      mkdir -p "${IMPALA_CUSTOM_CLUSTER_TEST_LOGS_DIR}"
+      IMPALA_MAX_LOG_FILES_SAVE="${IMPALA_MAX_LOG_FILES:-10}"
+      export IMPALA_MAX_LOG_FILES=0
+      # Run the custom-cluster tests after all other tests, since they will restart the
+      # cluster repeatedly and lose state.
+      # TODO: Consider moving in to run-tests.py.
+      echo "VIHANG-DEBUG Iteration : $i"
+      if ! "${IMPALA_HOME}/tests/run-custom-cluster-tests.sh" ${COMMON_PYTEST_ARGS} \
+          ${RUN_CUSTOM_CLUSTER_TESTS_ARGS}; then
+        TEST_RET_CODE=1
+      fi
+      export IMPALA_MAX_LOG_FILES="${IMPALA_MAX_LOG_FILES_SAVE}"
+    done
 
     # Run the FE custom cluster tests only if not running against S3.
     if [[ "$FE_TEST" == true && "${TARGET_FILESYSTEM}" != "s3" ]]; then
