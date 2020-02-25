@@ -250,6 +250,7 @@ do
       if ! "${IMPALA_HOME}/tests/run-custom-cluster-tests.sh" ${COMMON_PYTEST_ARGS} \
           ${RUN_CUSTOM_CLUSTER_TESTS_ARGS}; then
         TEST_RET_CODE=1
+        break
       fi
       export IMPALA_MAX_LOG_FILES="${IMPALA_MAX_LOG_FILES_SAVE}"
     done
