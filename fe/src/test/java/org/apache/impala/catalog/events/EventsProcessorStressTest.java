@@ -189,7 +189,6 @@ public class EventsProcessorStressTest {
     }
   }
 
-  @Ignore("Ignored until MAPREDUCE-6441 is available in the toolchain")
   @Test
   public void testUsingRandomHiveQueries() throws Exception {
     LOG.info("Using number of clients: {} number of queries per client: {}", numClients_,
