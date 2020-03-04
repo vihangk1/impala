@@ -208,9 +208,10 @@ import org.slf4j.LoggerFactory;
  * updates, DDL operations should not directly modify the HMS objects of the catalog
  * objects but should operate on copies instead.
  *
- * The CatalogOpExecutor uses table-level or Db-level locking to protect table metadata
- * during concurrent modifications and is responsible for assigning a new catalog
- * version when a table/Db is modified (e.g. alterTable() or alterDb()).
+ * The CatalogOpExecutor uses table-level or Db object level locking to protect table
+ * metadata or database metadata respectively during concurrent modifications and is
+ * responsible for assigning a new catalog version when a table/Db is modified
+ * (e.g. alterTable() or alterDb()).
  *
  * The following locking protocol is employed to ensure that modifying
  * the table/Db metadata and assigning a new catalog version is performed atomically and
@@ -1283,21 +1284,24 @@ public class CatalogOpExecutor {
     }
     boolean isPersistentJavaFn =
         (fn.getBinaryType() == TFunctionBinaryType.JAVA) && fn.isPersistent();
-    synchronized (metastoreDdlLock_) {
-      Db db = catalog_.getDb(fn.dbName());
-      if (db == null) {
-        throw new CatalogException("Database: " + fn.dbName() + " does not exist.");
-      }
+    Db db = catalog_.getDb(fn.dbName());
+    if (db == null) {
+      throw new CatalogException("Database: " + fn.dbName() + " does not exist.");
+    }
+    try {
+      tryLock(db, "creating function " + fn.getClass().getSimpleName());
       // Get a new catalog version to assign to the database being altered. This is
       // needed for events processor as this method creates alter database events.
       long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
-      addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(), newCatalogVersion);
+      catalog_.getLock().writeLock().unlock();
+      addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(),
+          newCatalogVersion);
       // Search for existing functions with the same name or signature that would
       // conflict with the function being added.
-      for (Function function: db.getFunctions(fn.functionName())) {
+      for (Function function : db.getFunctions(fn.functionName())) {
         if (isPersistentJavaFn || (function.isPersistent() &&
             (function.getBinaryType() == TFunctionBinaryType.JAVA)) ||
-                function.compare(fn, Function.CompareMode.IS_INDISTINGUISHABLE)) {
+            function.compare(fn, Function.CompareMode.IS_INDISTINGUISHABLE)) {
           if (!params.if_not_exists) {
             throw new CatalogException("Function " + fn.functionName() +
                 " already exists.");
@@ -1313,15 +1317,16 @@ public class CatalogOpExecutor {
         // the corresponding Jar and add each signature to the catalog.
         Preconditions.checkState(fn instanceof ScalarFunction);
         org.apache.hadoop.hive.metastore.api.Function hiveFn =
-            ((ScalarFunction)fn).toHiveFunction();
+            ((ScalarFunction) fn).toHiveFunction();
         List<Function> funcs = FunctionUtils.extractFunctions(fn.dbName(), hiveFn,
             BackendConfig.INSTANCE.getBackendCfg().local_library_path);
         if (funcs.isEmpty()) {
           throw new CatalogException(
-            "No compatible function signatures found in class: " + hiveFn.getClassName());
+              "No compatible function signatures found in class: " + hiveFn
+                  .getClassName());
         }
         if (addJavaFunctionToHms(fn.dbName(), hiveFn, params.if_not_exists)) {
-          for (Function addedFn: funcs) {
+          for (Function addedFn : funcs) {
             if (LOG.isTraceEnabled()) {
               LOG.trace(String.format("Adding function: %s.%s", addedFn.dbName(),
                   addedFn.signatureString()));
@@ -1348,6 +1353,8 @@ public class CatalogOpExecutor {
       } else {
         addSummary(resp, "Function already exists.");
       }
+    } finally {
+      db.getLock().unlock();
     }
   }
 
@@ -2025,24 +2032,27 @@ public class CatalogOpExecutor {
   private void dropFunction(TDropFunctionParams params, TDdlExecResponse resp)
       throws ImpalaException {
     FunctionName fName = FunctionName.fromThrift(params.fn_name);
-    synchronized (metastoreDdlLock_) {
-      Db db = catalog_.getDb(fName.getDb());
-      if (db == null) {
-        if (!params.if_exists) {
-            throw new CatalogException("Database: " + fName.getDb()
-                + " does not exist.");
-        }
-        addSummary(resp, "Database does not exist.");
-        return;
+    Db db = catalog_.getDb(fName.getDb());
+    if (db == null) {
+      if (!params.if_exists) {
+        throw new CatalogException("Database: " + fName.getDb()
+            + " does not exist.");
       }
+      addSummary(resp, "Database does not exist.");
+      return;
+    }
+    try {
+      tryLock(db, "dropping function " + fName);
       // Get a new catalog version to assign to the database being altered. This is
       // needed for events processor as this method creates alter database events.
       long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
-      addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(), newCatalogVersion);
+      catalog_.getLock().writeLock().unlock();
+      addCatalogServiceIdentifiers(db, catalog_.getCatalogServiceId(),
+          newCatalogVersion);
       List<TCatalogObject> removedFunctions = Lists.newArrayList();
       if (!params.isSetSignature()) {
         dropJavaFunctionFromHms(fName.getDb(), fName.getFunction(), params.if_exists);
-        for (Function fn: db.getFunctions(fName.getFunction())) {
+        for (Function fn : db.getFunctions(fName.getFunction())) {
           if (fn.getBinaryType() != TFunctionBinaryType.JAVA
               || !fn.isPersistent()) {
             continue;
@@ -2052,7 +2062,7 @@ public class CatalogOpExecutor {
         }
       } else {
         ArrayList<Type> argTypes = Lists.newArrayList();
-        for (TColumnType t: params.arg_types) {
+        for (TColumnType t : params.arg_types) {
           argTypes.add(Type.fromThrift(t));
         }
         Function desc = new Function(fName, argTypes, Type.INVALID, false);
@@ -2079,6 +2089,8 @@ public class CatalogOpExecutor {
         addSummary(resp, "Function does not exist.");
       }
       resp.result.setVersion(catalog_.getCatalogVersion());
+    } finally {
+      db.getLock().unlock();
     }
   }
 

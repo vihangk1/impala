@@ -21,12 +21,11 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
-
 import java.util.concurrent.locks.ReentrantLock;
+
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.impala.analysis.ColumnDef;
 import org.apache.impala.analysis.KuduPartitionParam;
@@ -504,18 +503,14 @@ public class Db extends CatalogObjectImpl implements FeDb {
   }
 
   /**
-   * Gets the current list of versions for in-flight events for this database
-   */
-  public List<Long> getVersionsForInflightEvents() {
-    return inFlightEvents_.getAll();
-  }
-
-  /**
    * Removes a given version from the collection of version numbers for in-flight events
    * @param versionNumber version number to remove from the collection
    * @return true if version was successfully removed, false if didn't exist
    */
   public boolean removeFromVersionsForInflightEvents(long versionNumber) {
+    Preconditions.checkState(dbLock_.isHeldByCurrentThread(),
+        "addToVersionsForInFlightEvents called without getting the db lock for "
+            + getName() + " database.");
     return inFlightEvents_.remove(versionNumber);
   }
 
@@ -527,6 +522,9 @@ public class Db extends CatalogObjectImpl implements FeDb {
    * @param versionNumber version number to add
    */
   public void addToVersionsForInflightEvents(long versionNumber) {
+    Preconditions.checkState(dbLock_.isHeldByCurrentThread(),
+        "addToVersionsForInFlightEvents called without getting the db lock for "
+            + getName() + " database.");
     if (!inFlightEvents_.add(versionNumber)) {
       LOG.warn(String.format("Could not add version %s to the list of in-flight "
           + "events. This could cause unnecessary database %s invalidation when the "

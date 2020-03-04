@@ -432,7 +432,7 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   /**
-   * Similar to tryLock on a table, but works on a database instead of Table.
+   * Similar to tryLock on a table, but works on a database object instead of Table.
    * TODO: Refactor the code so that both table and db can be "lockable" using a single
    * method.
    */
@@ -812,42 +812,6 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   /**
-   * Gets the list of versions for in-flight events for the given table. Applicable
-   * only when external event processing is enabled.
-   * @param dbName database name
-   * @param tblName table name
-   * @return List of previous version numbers for in-flight events on this table.
-   * If table is not laoded returns a empty list. If event processing is disabled,
-   * returns a empty list
-   */
-  public List<Long> getInFlightVersionsForEvents(String dbName, String tblName)
-      throws DatabaseNotFoundException, TableNotFoundException {
-    Preconditions.checkState(isEventProcessingActive(),
-        "Event processing should be enabled before calling this method");
-    List<Long> result = Collections.EMPTY_LIST;
-    versionLock_.readLock().lock();
-    try {
-      Db db = getDb(dbName);
-      if (db == null) {
-        throw new DatabaseNotFoundException(
-            String.format("Database %s not found", dbName));
-      }
-      if (tblName == null) {
-        return db.getVersionsForInflightEvents();
-      }
-      Table tbl = getTable(dbName, tblName);
-      if (tbl == null) {
-        throw new TableNotFoundException(
-            String.format("Table %s not found", new TableName(dbName, tblName)));
-      }
-      if (tbl instanceof IncompleteTable) return result;
-      return tbl.getVersionsForInflightEvents();
-    } finally {
-      versionLock_.readLock().unlock();
-    }
-  }
-
-  /**
    * Evaluates if the information from an event (serviceId and versionNumber) matches to
    * the catalog object. If there is match, the in-flight version for that object is
    * removed and method returns true. If it does not match, returns false
@@ -872,8 +836,8 @@ public class CatalogServiceCatalog extends Catalog {
     // if the service id from event doesn't match with our service id this is not a
     // self-event
     if (!getCatalogServiceId().equals(serviceIdFromEvent)) {
-      LOG.info("Not a self-event because service id of this catalog ({})does not match "
-          + "with one in event.", getCatalogServiceId());
+      LOG.info("Not a self-event because service id of this catalog {} does not match "
+          + "with one in event {}.", getCatalogServiceId(), serviceIdFromEvent);
       return false;
     }
     Db db = getDb(ctx.getDbName());
@@ -956,13 +920,9 @@ public class CatalogServiceCatalog extends Catalog {
    */
   public void addVersionsForInflightEvents(Table tbl, long versionNumber) {
     if (!isEventProcessingActive()) return;
-    // we generally don't take locks on Incomplete tables since they are atomically
-    // replaced during load
-    Preconditions.checkState(
-        tbl instanceof IncompleteTable || tbl.getLock().isHeldByCurrentThread());
+    tbl.addToVersionsForInflightEvents(versionNumber);
     LOG.info("Added catalog version {} in table's {} in-flight events",
         versionNumber, tbl.getFullName());
-    tbl.addToVersionsForInflightEvents(versionNumber);
   }
 
   /**
