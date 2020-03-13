@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -1353,8 +1354,8 @@ public class CatalogOpExecutor {
   private void createFunction(TCreateFunctionParams params, TDdlExecResponse resp)
       throws ImpalaException {
     Function fn = Function.fromThrift(params.getFn());
-    if (LOG.isTraceEnabled()) {
-      LOG.trace(String.format("Adding %s: %s",
+    if (LOG.isInfoEnabled()) {
+      LOG.info(String.format("Adding %s: %s",
           fn.getClass().getSimpleName(), fn.signatureString()));
     }
     boolean isPersistentJavaFn =
@@ -1419,6 +1420,8 @@ public class CatalogOpExecutor {
           addCatalogServiceIdentifiers(db.getMetaStoreDb(),
               catalog_.getCatalogServiceId(), newCatalogVersion);
           // Flush DB changes to metastore
+          LOG.info("Issuing alter database for db {} for adding function {}",
+              db.getName(), fn.getName());
           applyAlterDatabase(db.getMetaStoreDb());
           addedFunctions.add(fn.toTCatalogObject());
           // now that HMS alter database has succeeded, add this version to list of
@@ -1640,7 +1643,7 @@ public class CatalogOpExecutor {
       return;
     }
 
-    LOG.trace("Dropping database " + dbName);
+    LOG.info("Dropping database " + dbName);
     Db db = catalog_.getDb(dbName);
     if (db != null && db.numFunctions() > 0 && !params.cascade) {
       throw new CatalogException("Database " + db.getName() + " is not empty");
@@ -2122,7 +2125,7 @@ public class CatalogOpExecutor {
       addSummary(resp, "Database does not exist.");
       return;
     }
-
+    LOG.info("Dropping function {}", fName);
     tryLock(db, "dropping function " + fName);
     // Get a new catalog version to assign to the database being altered. This is
     // needed for events processor as this method creates alter database events.
@@ -2156,6 +2159,9 @@ public class CatalogOpExecutor {
           addCatalogServiceIdentifiers(db.getMetaStoreDb(),
               catalog_.getCatalogServiceId(), newCatalogVersion);
           // Flush DB changes to metastore
+          LOG.info(
+              "Applying alter database on db {} since function {} was removed from parameters",
+              db.getName(), fn.getName());
           applyAlterDatabase(db.getMetaStoreDb());
           removedFunctions.add(fn.toTCatalogObject());
           // now that HMS alter operation has succeeded, add this version to list of
@@ -4591,6 +4597,8 @@ public class CatalogOpExecutor {
           newCatalogVersion);
       msDb.setDescription(comment);
       try {
+        LOG.info("Applying alter database on db {} to set comment as {}. parameters {}",
+            db.getName(), comment, StringUtils.join(msDb.getParameters()));
         applyAlterDatabase(msDb);
       } catch (ImpalaRuntimeException e) {
         throw e;
@@ -4641,6 +4649,8 @@ public class CatalogOpExecutor {
       msDb.setOwnerName(params.owner_name);
       msDb.setOwnerType(PrincipalType.valueOf(params.owner_type.name()));
       try {
+        LOG.info("Applying alter database on db {} to set owner as {}. parameters {}",
+            db.getName(), params.owner_name, StringUtils.join(msDb.getParameters()));
         applyAlterDatabase(msDb);
       } catch (ImpalaRuntimeException e) {
         throw e;

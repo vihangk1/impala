@@ -139,7 +139,13 @@ public class Db extends CatalogObjectImpl implements FeDb {
   private boolean removeFromHmsParameters(String k) {
     org.apache.hadoop.hive.metastore.api.Database msDb = thriftDb_.get().metastore_db;
     Preconditions.checkNotNull(msDb);
-    if (msDb.getParameters() == null) return false;
+    if (msDb.getParameters() == null) {
+      LOG.info("Removing function {} failed since parameters are null for db {}", k,
+          getName());
+      return false;
+    }
+    LOG.info("Function {} in db {} exists: {}", k, getName(),
+        msDb.getParameters().containsKey(k));
     return msDb.getParameters().remove(k) != null;
   }
 
@@ -275,6 +281,7 @@ public class Db extends CatalogObjectImpl implements FeDb {
         throw new ImpalaRuntimeException(
             "Serialized function size exceeded HMS 4K byte limit");
       }
+      LOG.info("Adding function key {} to parameters of db {}", fnKey, getName());
       putToHmsParameters(fnKey, base64Fn);
     } catch (ImpalaException | TException  e) {
       LOG.error("Error adding function " + fn.getName() + " to DB params", e);
