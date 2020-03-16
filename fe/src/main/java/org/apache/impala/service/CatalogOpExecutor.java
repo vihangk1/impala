@@ -1366,10 +1366,12 @@ public class CatalogOpExecutor {
     }
 
     tryLock(db, "creating function " + fn.getClass().getSimpleName());
+    LOG.info("Db lock taken for {}" + db.getName());
     // Get a new catalog version to assign to the database being altered. This is
     // needed for events processor as this method creates alter database events.
     long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
     catalog_.getLock().writeLock().unlock();
+    LOG.info("VIHANG-DEBUG: Releasing version write lock");
     try {
       // Search for existing functions with the same name or signature that would
       // conflict with the function being added.
@@ -1438,7 +1440,9 @@ public class CatalogOpExecutor {
         addSummary(resp, "Function already exists.");
       }
     } finally {
+      LOG.info("Releasing db lock for {}", db.getName());
       db.getLock().unlock();
+      LOG.info("Released db lock for {}", db.getName());
     }
   }
 
@@ -2127,10 +2131,12 @@ public class CatalogOpExecutor {
     }
     LOG.info("Dropping function {}", fName);
     tryLock(db, "dropping function " + fName);
+    LOG.info("Taken db lock for {}", db.getName());
     // Get a new catalog version to assign to the database being altered. This is
     // needed for events processor as this method creates alter database events.
     long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
     catalog_.getLock().writeLock().unlock();
+    LOG.info("VIHANG-DEBUG: Released version lock");
     try {
       List<TCatalogObject> removedFunctions = Lists.newArrayList();
       if (!params.isSetSignature()) {
@@ -2149,8 +2155,10 @@ public class CatalogOpExecutor {
           argTypes.add(Type.fromThrift(t));
         }
         Function desc = new Function(fName, argTypes, Type.INVALID, false);
+        LOG.info("Removing function {} from catalog", desc.getFunctionName());
         Function fn = catalog_.removeFunction(desc);
         if (fn == null) {
+          LOG.info("VIHANG-DEBUG: removed function {} returned null", desc.getFunctionName());
           if (!params.if_exists) {
             throw new CatalogException(
                 "Function: " + desc.signatureString() + " does not exist.");
@@ -2178,7 +2186,9 @@ public class CatalogOpExecutor {
       }
       resp.result.setVersion(catalog_.getCatalogVersion());
     } finally {
+      LOG.info("Releasing db lock for {}", db.getName());
       db.getLock().unlock();
+      LOG.info("Released db lock for {}", db.getName());
     }
   }
 

@@ -1952,6 +1952,7 @@ public class CatalogServiceCatalog extends Catalog {
   public Function removeFunction(Function desc) {
     versionLock_.writeLock().lock();
     try {
+      LOG.info("VIHANG-DEBUG: Took write lock. Removing function {}", desc.getFunctionName());
       Function removedFn = super.removeFunction(desc);
       if (removedFn != null) {
         removedFn.setCatalogVersion(incrementAndGetCatalogVersion());

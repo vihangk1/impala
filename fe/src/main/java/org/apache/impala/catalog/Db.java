@@ -246,7 +246,10 @@ public class Db extends CatalogObjectImpl implements FeDb {
   public Function getFunction(Function desc, Function.CompareMode mode) {
     synchronized (functions_) {
       List<Function> fns = functions_.get(desc.functionName());
-      if (fns == null) return null;
+      if (fns == null) {
+        LOG.info("VIHANG-DEBUG: Call to getFunction for {} returning null", desc.functionName());
+        return null;
+      }
       return FunctionUtils.resolveFunction(fns, desc, mode);
     }
   }
@@ -314,6 +317,7 @@ public class Db extends CatalogObjectImpl implements FeDb {
       if (fns == null) {
         fns = new ArrayList<>();
         functions_.put(fn.functionName(), fns);
+        LOG.info("VIHANG-DEBUG: Added {} into functions map", fn.getFunctionName());
       }
       if (addToDbParams && !addFunctionToDbParams(fn)) return false;
       fns.add(fn);
@@ -327,12 +331,17 @@ public class Db extends CatalogObjectImpl implements FeDb {
    */
   public Function removeFunction(Function desc) {
     synchronized (functions_) {
+      LOG.info("Into removeFunction for {}", desc.getFunctionName());
       Function fn = getFunction(desc, Function.CompareMode.IS_INDISTINGUISHABLE);
       if (fn == null) return null;
       List<Function> fns = functions_.get(desc.functionName());
       Preconditions.checkNotNull(fns);
       fns.remove(fn);
-      if (fns.isEmpty()) functions_.remove(desc.functionName());
+      LOG.info("VIHANG-DEBUG: Removed function {} from function list", fn.getFunctionName());
+      if (fns.isEmpty()) {
+        functions_.remove(desc.functionName());
+        LOG.info("VIHANG-DEBUG: Removed function list {} from functoins map", desc.getFunctionName());
+      }
       if (fn.getBinaryType() == TFunctionBinaryType.JAVA) return fn;
       // Remove the function from the metastore database parameters
       String fnKey = FUNCTION_INDEX_PREFIX + fn.signatureString();
@@ -344,6 +353,7 @@ public class Db extends CatalogObjectImpl implements FeDb {
 
   public void removeAllFunctions() {
     synchronized (functions_) {
+      LOG.info("VIHANG-DEBUG: Removing all functions!!");
       functions_.clear();
     }
   }
