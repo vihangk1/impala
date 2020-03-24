@@ -177,6 +177,7 @@ class Statestore : public CacheLineAligned {
   static const std::string IMPALA_MEMBERSHIP_TOPIC;
   /// Topic tracking the state of admission control on all coordinators.
   static const std::string IMPALA_REQUEST_QUEUE_TOPIC;
+  static const std::string IMPALA_CATALOG_MEMBERSHIP_TOPIC;
 
   int32_t port() { return thrift_server_->port(); }
 

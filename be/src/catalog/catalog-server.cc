@@ -276,6 +276,11 @@ Status CatalogServer::Start() {
     status.AddDetail("CatalogService failed to start");
     return status;
   }
+  StatestoreSubscriber::UpdateCallback catalogMembershipCb =
+          bind<void>(mem_fn(&CatalogServer::UpdateCatalogMembershipCallback), this, _1, _2);
+  Status status2 = statestore_subscriber_->AddTopic(Statestore::IMPALA_CATALOG_MEMBERSHIP_TOPIC,
+          /* is_transient=*/ true, /* populate_min_subscriber_topic_version=*/ false,
+                                                   "", catalogMembershipCb);
   RETURN_IF_ERROR(statestore_subscriber_->Start());
 
   // Notify the thread to start for the first time.
@@ -284,6 +289,46 @@ Status CatalogServer::Start() {
     catalog_update_cv_.NotifyOne();
   }
   return Status::OK();
+}
+
+void CatalogServer::UpdateCatalogMembershipCallback(
+        const impala::StatestoreSubscriber::TopicDeltaMap &incoming_topic_deltas,
+        vector<TTopicDelta> *subscriber_topic_updates) {
+    StatestoreSubscriber::TopicDeltaMap::const_iterator topic =
+            incoming_topic_deltas.find(Statestore::IMPALA_CATALOG_MEMBERSHIP_TOPIC);
+    if (topic == incoming_topic_deltas.end()) {
+        LOG(INFO) << "VIHANG-DEBUG: Membership topic didn't contain any deltas";
+        return;
+    } else {
+        const TTopicDelta& update = topic->second;
+        if (!update.topic_entries.empty()) {
+            for (const TTopicItem& item : update.topic_entries) {
+                LOG(INFO) << "VIHANG-DEBUG: Item key: " << item.key << " value: " << item.value;
+            }
+        } else {
+            LOG(INFO) << "VIHANG-DEBUG: topic entries is empty";
+        }
+        LOG(INFO) << "VIHANG-DEBUG: Received cluster membership update";
+    }
+    AddCatalogServerStatusToStatestore(subscriber_topic_updates);
+}
+
+void CatalogServer::AddCatalogServerStatusToStatestore(vector<TTopicDelta>* subscriber_topic_updates) {
+    LOG(INFO) << "VIHANG-DEBUG: Sending catalog server info to statestore";
+    subscriber_topic_updates->emplace_back(TTopicDelta());
+    TTopicDelta& update = subscriber_topic_updates->back();
+    update.topic_name = Statestore::IMPALA_CATALOG_MEMBERSHIP_TOPIC;
+    update.topic_entries.emplace_back(TTopicItem());
+    // Setting this flag allows us to pass the resulting topic update to other
+    // ClusterMembershipMgr instances in tests unmodified.
+    update.is_delta = true;
+
+    TTopicItem& item = update.topic_entries.back();
+    TNetworkAddress server_address = MakeNetworkAddress(FLAGS_hostname,
+                                                        FLAGS_catalog_service_port);
+    string itemKey = Substitute("catalog-server@$0", TNetworkAddressToString(server_address));
+    item.key = itemKey;
+    item.value = itemKey;
 }
 
 void CatalogServer::RegisterWebpages(Webserver* webserver) {

@@ -59,6 +59,7 @@ class Catalog;
 class CatalogServer {
  public:
   static std::string IMPALA_CATALOG_TOPIC;
+  static std::string IMPALA_CATALOG_MEMBERSHIP_TOPIC;
   CatalogServer(MetricGroup* metrics);
 
   /// Starts this CatalogService instance.
@@ -142,6 +143,11 @@ class CatalogServer {
       const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
       std::vector<TTopicDelta>* subscriber_topic_updates);
 
+  void UpdateCatalogMembershipCallback(
+          const StatestoreSubscriber::TopicDeltaMap& incoming_topic_deltas,
+          std::vector<TTopicDelta>* subscriber_topic_updates);
+
+  void AddCatalogServerStatusToStatestore(vector<TTopicDelta>* subscriber_topic_updates);
   /// Executed by the catalog_update_gathering_thread_. Calls into JniCatalog
   /// to get the latest set of catalog objects that exist, along with some metadata on
   /// each object. The results are stored in the shared catalog_objects_ data structure.
