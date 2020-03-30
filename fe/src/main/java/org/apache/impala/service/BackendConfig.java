@@ -243,6 +243,7 @@ public class BackendConfig {
   }
 
   public List<Integer> getNodeIds() {
+    if (backendCfg_.catalog_server_node_ids.isEmpty()) return Arrays.asList(1);
     List<Integer> nodeIds = new ArrayList<>();
     for (String id : backendCfg_.catalog_server_node_ids.split(",")) {
       nodeIds.add(Integer.parseInt(id));

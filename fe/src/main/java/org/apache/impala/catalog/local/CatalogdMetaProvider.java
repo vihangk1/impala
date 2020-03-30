@@ -361,7 +361,9 @@ public class CatalogdMetaProvider implements MetaProvider {
 
   @Override
   public boolean isReady() {
-    return !catalogServiceUpdates.isEmpty();
+    synchronized (catalogServiceIdLock_) {
+      return !catalogServiceUpdates.isEmpty();
+    }
   }
 
   public void setAuthzChecker(
@@ -1046,7 +1048,10 @@ public class CatalogdMetaProvider implements MetaProvider {
    */
   public synchronized TUpdateCatalogCacheResponse updateCatalogCache(
       TUpdateCatalogCacheRequest req) {
+    TUniqueId catalogServiceId = null;
     if (req.isSetCatalog_service_id()) {
+      //TODO(Vihang): Do we even ever set this?
+      catalogServiceId = req.catalog_service_id;
       witnessCatalogServiceId(req.catalog_service_id);
     }
 
@@ -1079,7 +1084,18 @@ public class CatalogdMetaProvider implements MetaProvider {
             "in a later catalog version: {}", obj);
         continue;
       }
-
+      LOG.info("Received object type: {} in the topic update", obj.getType());
+      switch(obj.getType()) {
+        case CATALOG:
+          LOG.info("Catalog service id {}", obj.getCatalog().getCatalog_service_id());
+          break;
+        case TABLE:
+          LOG.info("Catalog table name {}.{}", obj.getTable().getDb_name(),
+              obj.getTable().getTbl_name());
+          break;
+        default:
+          // nothing
+      }
       invalidateCacheForObject(obj);
 
       // The sequencing of updates to authorization objects is important since they
@@ -1098,7 +1114,13 @@ public class CatalogdMetaProvider implements MetaProvider {
         // to keep track of this and pass it back to the C++ code in the return value
         // of this call. This is also used to know when the catalog is ready at
         // startup.
+        LOG.info(
+            "Received catalog object. Version: {}, serviceId: {}, lastResetVersion: {}",
+            obj.catalog_version, obj.catalog.catalog_service_id,
+            obj.catalog.last_reset_catalog_version);
         nextCatalogVersion = obj.catalog_version;
+        catalogServiceId = obj.catalog.catalog_service_id.deepCopy();
+        LOG.info("Setting local variable catalogServiceId to {}", catalogServiceId);
         witnessCatalogServiceId(obj.catalog.catalog_service_id);
         long resetStartVersion = obj.catalog.last_reset_catalog_version;
         synchronized (catalogServiceIdLock_) {
@@ -1120,16 +1142,17 @@ public class CatalogdMetaProvider implements MetaProvider {
     for (TCatalogObject obj : authObjectSequencer.getDeletedObjects()) {
       updateAuthPolicy(obj, /*isDelete=*/true);
     }
-
+    // we must get a catalog service id in each topic update
+    Preconditions.checkNotNull(catalogServiceId);
     deletedObjectsLog_.garbageCollect(
-        catalogServiceUpdates.get(req.catalog_service_id).lastResetCatalogVersion_.get());
+        catalogServiceUpdates.get(catalogServiceId).lastResetCatalogVersion_.get());
 
     // NOTE: it's important to defer setting the new catalog version until the
     // end of the loop, since the CATALOG object might be one of the first objects
     // processed, and we don't want to prematurely indicate that we are done processing
     // the update.
     if (nextCatalogVersion != null) {
-      catalogServiceUpdates.get(req.catalog_service_id).lastSeenCatalogVersion_
+      catalogServiceUpdates.get(catalogServiceId).lastSeenCatalogVersion_
           .set(nextCatalogVersion);
     }
 
@@ -1140,8 +1163,8 @@ public class CatalogdMetaProvider implements MetaProvider {
       // catalog objects with catalog version <= lastResetCatalogVersion_ should have
       // been invalidated. See more comments above the definition of
       // lastResetCatalogVersion_.
-      CatalogServiceUpdateInfo updateInfo = catalogServiceUpdates.get(req.catalog_service_id);
-      return new TUpdateCatalogCacheResponse(req.catalog_service_id,
+      CatalogServiceUpdateInfo updateInfo = catalogServiceUpdates.get(catalogServiceId);
+      return new TUpdateCatalogCacheResponse(catalogServiceId,
           updateInfo.lastResetCatalogVersion_.get() + 1,
           updateInfo.lastSeenCatalogVersion_.get());
     }
@@ -1211,6 +1234,10 @@ public class CatalogdMetaProvider implements MetaProvider {
           LOG.warn("Detected a new catalog service: service ID {} sent an update for " +
               "for the first time. Invalidating all cached metadata on this coordinator."
               ,serviceId);
+        } else {
+          LOG.info(
+              "VIHANG-DEBUG: Adding catalog service id {} to catalogServiceUpdates map",
+              serviceId);
         }
         catalogServiceUpdates.put(serviceId, new CatalogServiceUpdateInfo());
         cache_.invalidateAll();

@@ -682,6 +682,12 @@ public class CatalogServiceCatalog extends Catalog {
         // to invalidate their local cache.
         TCatalogObject minimalObject = getMinimalObjectForV2(obj);
         if (minimalObject != null) {
+          if (minimalObject.getType().equals(TCatalogObjectType.CATALOG)) {
+            LOG.info(
+                "VIHANG-DEBUG: Adding catalog object to the topic update serviceId: {}, version: {}",
+                minimalObject.getCatalog().getCatalog_service_id(),
+                minimalObject.getCatalog_version());
+          }
           byte[] data = serializer.serialize(minimalObject);
           String v2Key = CatalogServiceConstants.CATALOG_TOPIC_V2_PREFIX + key;
           if (!FeSupport.NativeAddPendingTopicItem(nativeCatalogServerPtr, v2Key,
