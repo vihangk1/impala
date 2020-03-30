@@ -20,6 +20,9 @@ package org.apache.impala.service;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic
     .HADOOP_SECURITY_AUTH_TO_LOCAL;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.authentication.util.KerberosName;
 import org.apache.impala.analysis.SqlScanner;
@@ -233,5 +236,17 @@ public class BackendConfig {
 
   public boolean isDedicatedCoordinator() {
     return (backendCfg_.is_executor == false) && (backendCfg_.is_coordinator == true);
+  }
+
+  public int getNumberOfCatalogServers() {
+    return backendCfg_.num_catalog_servers;
+  }
+
+  public List<Integer> getNodeIds() {
+    List<Integer> nodeIds = new ArrayList<>();
+    for (String id : backendCfg_.catalog_server_node_ids.split(",")) {
+      nodeIds.add(Integer.parseInt(id));
+    }
+    return nodeIds;
   }
 }

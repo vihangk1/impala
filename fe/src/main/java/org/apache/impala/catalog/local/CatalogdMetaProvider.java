@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -267,33 +268,37 @@ public class CatalogdMetaProvider implements MetaProvider {
    */
   final Cache<Object,Object> cache_;
 
-  /**
-   * The last catalog version seen in an update from the catalogd.
-   *
-   * This is used to implement SYNC_DDL: when a SYNC_DDL operation is done, the catalog
-   * responds to the DDL with the version of the catalog at which the DDL has been
-   * applied. The backend then waits until this 'lastSeenCatalogVersion' advances past
-   * the version where the DDL was applied, and correlates that with the corresponding
-   * statestore topic version. It then waits until the statestore reports that this topic
-   * version has been distributed to all coordinators before proceeding.
-   */
-  private final AtomicLong lastSeenCatalogVersion_ = new AtomicLong(
-      Catalog.INITIAL_CATALOG_VERSION);
+  private final Map<TUniqueId, CatalogServiceUpdateInfo> catalogServiceUpdates = new ConcurrentHashMap<>();
 
-  /**
-   * The catalog version at last time when catalogd starts resetting the entire catalog.
-   *
-   * This is used to implement global INVALIDATE METADATA: Catalogd saves its catalog
-   * version to this when it starts to reset the entire catalog. After the reset is done,
-   * all valid catalog objects should have a catalog version larger than this. Thus, we
-   * can safely advance the catalog version lower bound to this version + 1.
-   * The coordinator first gets this value in the RPC response from Catalogd and starts
-   * to wait until the catalog version lower bound becomes larger than it. Once we
-   * receive the update from statestored and update our catalog cache accordingly, the
-   * catalog version lower bound is set to lastResetCatalogVersion_ + 1 (returned by
-   * updateCatalogCache()).
-   */
-  private final AtomicLong lastResetCatalogVersion_ = new AtomicLong(-1);
+  private class CatalogServiceUpdateInfo {
+    /**
+     * The last catalog version seen in an update from the catalogd.
+     *
+     * This is used to implement SYNC_DDL: when a SYNC_DDL operation is done, the catalog
+     * responds to the DDL with the version of the catalog at which the DDL has been
+     * applied. The backend then waits until this 'lastSeenCatalogVersion' advances past
+     * the version where the DDL was applied, and correlates that with the corresponding
+     * statestore topic version. It then waits until the statestore reports that this topic
+     * version has been distributed to all coordinators before proceeding.
+     */
+    private final AtomicLong lastSeenCatalogVersion_ = new AtomicLong(
+        Catalog.INITIAL_CATALOG_VERSION);
+
+    /**
+     * The catalog version at last time when catalogd starts resetting the entire catalog.
+     *
+     * This is used to implement global INVALIDATE METADATA: Catalogd saves its catalog
+     * version to this when it starts to reset the entire catalog. After the reset is done,
+     * all valid catalog objects should have a catalog version larger than this. Thus, we
+     * can safely advance the catalog version lower bound to this version + 1.
+     * The coordinator first gets this value in the RPC response from Catalogd and starts
+     * to wait until the catalog version lower bound becomes larger than it. Once we
+     * receive the update from statestored and update our catalog cache accordingly, the
+     * catalog version lower bound is set to lastResetCatalogVersion_ + 1 (returned by
+     * updateCatalogCache()).
+     */
+    private final AtomicLong lastResetCatalogVersion_ = new AtomicLong(-1);
+  }
 
   /**
    * Tracks objects that have been deleted in response to a DDL issued from this
@@ -306,7 +311,6 @@ public class CatalogdMetaProvider implements MetaProvider {
    * has restarted.
    */
   @GuardedBy("catalogServiceIdLock_")
-  private TUniqueId catalogServiceId_ = Catalog.INITIAL_CATALOG_SERVICE_ID;
   private final Object catalogServiceIdLock_ = new Object();
 
 
@@ -357,7 +361,7 @@ public class CatalogdMetaProvider implements MetaProvider {
 
   @Override
   public boolean isReady() {
-    return lastSeenCatalogVersion_.get() > Catalog.INITIAL_CATALOG_VERSION;
+    return !catalogServiceUpdates.isEmpty();
   }
 
   public void setAuthzChecker(
@@ -1097,10 +1101,15 @@ public class CatalogdMetaProvider implements MetaProvider {
         nextCatalogVersion = obj.catalog_version;
         witnessCatalogServiceId(obj.catalog.catalog_service_id);
         long resetStartVersion = obj.catalog.last_reset_catalog_version;
-        if (lastResetCatalogVersion_.getAndSet(resetStartVersion) != resetStartVersion) {
-          // Detected a new reset() finishes in Catalogd, clear the cache in case some
-          // tables are skipped in this topic update.
-          cache_.invalidateAll();
+        synchronized (catalogServiceIdLock_) {
+          //TODO(Vihang) probably a race here.
+          if (catalogServiceUpdates
+              .get(obj.catalog.catalog_service_id).lastResetCatalogVersion_
+              .getAndSet(resetStartVersion) != resetStartVersion) {
+            // Detected a new reset() finishes in Catalogd, clear the cache in case some
+            // tables are skipped in this topic update.
+            cache_.invalidateAll();
+          }
         }
       }
     }
@@ -1112,14 +1121,16 @@ public class CatalogdMetaProvider implements MetaProvider {
       updateAuthPolicy(obj, /*isDelete=*/true);
     }
 
-    deletedObjectsLog_.garbageCollect(lastSeenCatalogVersion_.get());
+    deletedObjectsLog_.garbageCollect(
+        catalogServiceUpdates.get(req.catalog_service_id).lastResetCatalogVersion_.get());
 
     // NOTE: it's important to defer setting the new catalog version until the
     // end of the loop, since the CATALOG object might be one of the first objects
     // processed, and we don't want to prematurely indicate that we are done processing
     // the update.
     if (nextCatalogVersion != null) {
-      lastSeenCatalogVersion_.set(nextCatalogVersion);
+      catalogServiceUpdates.get(req.catalog_service_id).lastSeenCatalogVersion_
+          .set(nextCatalogVersion);
     }
 
     // NOTE: the return value is ignored when this function is called by a DDL
@@ -1129,8 +1140,10 @@ public class CatalogdMetaProvider implements MetaProvider {
       // catalog objects with catalog version <= lastResetCatalogVersion_ should have
       // been invalidated. See more comments above the definition of
       // lastResetCatalogVersion_.
-      return new TUpdateCatalogCacheResponse(catalogServiceId_,
-          lastResetCatalogVersion_.get() + 1, lastSeenCatalogVersion_.get());
+      CatalogServiceUpdateInfo updateInfo = catalogServiceUpdates.get(req.catalog_service_id);
+      return new TUpdateCatalogCacheResponse(req.catalog_service_id,
+          updateInfo.lastResetCatalogVersion_.get() + 1,
+          updateInfo.lastSeenCatalogVersion_.get());
     }
   }
 
@@ -1193,13 +1206,13 @@ public class CatalogdMetaProvider implements MetaProvider {
    */
   private void witnessCatalogServiceId(TUniqueId serviceId) {
     synchronized (catalogServiceIdLock_) {
-      if (!catalogServiceId_.equals(serviceId)) {
-        if (!catalogServiceId_.equals(Catalog.INITIAL_CATALOG_SERVICE_ID)) {
-          LOG.warn("Detected catalog service restart: service ID changed from " +
-              "{} to {}. Invalidating all cached metadata on this coordinator.",
-              catalogServiceId_, serviceId);
+      if (!catalogServiceUpdates.containsKey(serviceId)) {
+        if (!catalogServiceUpdates.isEmpty()) {
+          LOG.warn("Detected a new catalog service: service ID {} sent an update for " +
+              "for the first time. Invalidating all cached metadata on this coordinator."
+              ,serviceId);
         }
-        catalogServiceId_ = serviceId;
+        catalogServiceUpdates.put(serviceId, new CatalogServiceUpdateInfo());
         cache_.invalidateAll();
         // TODO(todd): we probably need to invalidate the auth policy too.
         // we are probably better off detecting this at a higher level and

@@ -24,6 +24,8 @@ import org.apache.impala.service.BackendConfig;
 import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TUpdateExecutorMembershipRequest;
 import com.google.common.collect.Sets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Singleton class that represents a snapshot of the Impalad executor membership. Host
@@ -32,6 +34,7 @@ import com.google.common.collect.Sets;
  * so that clients don't need to hold a lock while examining a snapshot.
  */
 public class ExecutorMembershipSnapshot {
+  private static Logger LOG = LoggerFactory.getLogger(ExecutorMembershipSnapshot.class);
   // The latest instance of the ExecutorMembershipSnapshot.
   private static AtomicReference<ExecutorMembershipSnapshot> cluster_ =
       new AtomicReference<ExecutorMembershipSnapshot>(new ExecutorMembershipSnapshot());
@@ -102,6 +105,7 @@ public class ExecutorMembershipSnapshot {
   // Atomically update the singleton snapshot instance.  After the update completes,
   // all calls to getCluster() will return the new snapshot.
   public static void update(TUpdateExecutorMembershipRequest request) {
+    LOG.info("VIHANG-INFO: Received a update executorMembership request");
     cluster_.set(new ExecutorMembershipSnapshot(request));
   }
 

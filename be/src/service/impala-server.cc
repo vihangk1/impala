@@ -1581,17 +1581,25 @@ void ImpalaServer::CatalogUpdateCallback(
   } else {
     {
       unique_lock<mutex> unique_lock(catalog_version_lock_);
-      if (catalog_update_info_.catalog_version != resp.new_catalog_version) {
+      auto it = catalog_update_info_.find(resp.catalog_service_id);
+      if (it == catalog_update_info_.end()) {
+          catalog_update_info_.emplace(
+                  resp.catalog_service_id, CatalogUpdateVersionInfo());
+      }
+      //TODO there must be a better way to do this
+      auto it2 = catalog_update_info_.find(resp.catalog_service_id);
+      CatalogUpdateVersionInfo& catalog_update_version_info = it2->second;
+      if (catalog_update_version_info.catalog_version != resp.new_catalog_version) {
         LOG(INFO) << "Catalog topic update applied with version: " <<
             resp.new_catalog_version << " new min catalog object version: " <<
             resp.catalog_object_version_lower_bound;
       }
-      catalog_update_info_.catalog_version = resp.new_catalog_version;
-      catalog_update_info_.catalog_topic_version = delta.to_version;
-      catalog_update_info_.catalog_service_id = resp.catalog_service_id;
-      catalog_update_info_.catalog_object_version_lower_bound =
-          resp.catalog_object_version_lower_bound;
-      catalog_update_info_.UpdateCatalogVersionMetrics();
+      catalog_update_version_info.catalog_version = resp.new_catalog_version;
+      catalog_update_version_info.catalog_topic_version = delta.to_version;
+      catalog_update_version_info.catalog_service_id = resp.catalog_service_id;
+      catalog_update_version_info.catalog_object_version_lower_bound =
+        resp.catalog_object_version_lower_bound;
+      catalog_update_version_info.UpdateCatalogVersionMetrics();
     }
     ImpaladMetrics::CATALOG_READY->SetValue(resp.new_catalog_version > 0);
     // TODO: deal with an error status
@@ -1609,35 +1617,45 @@ void ImpalaServer::CatalogUpdateCallback(
 void ImpalaServer::WaitForCatalogUpdate(const int64_t catalog_update_version,
     const TUniqueId& catalog_service_id) {
   unique_lock<mutex> unique_lock(catalog_version_lock_);
+  auto it = catalog_update_info_.find(catalog_service_id);
+  DCHECK(it != catalog_update_info_.end());
+  CatalogUpdateVersionInfo& catalog_update_version_info = it->second;
+
   // Wait for the update to be processed locally.
   VLOG_QUERY << "Waiting for catalog version: " << catalog_update_version
-             << " current version: " << catalog_update_info_.catalog_version;
-  while (catalog_update_info_.catalog_version < catalog_update_version &&
-         catalog_update_info_.catalog_service_id == catalog_service_id) {
-    catalog_version_update_cv_.Wait(unique_lock);
+             << " current version: " << catalog_update_version_info.catalog_version;
+  while (catalog_update_info_.count(catalog_service_id) > 0) {
+      catalog_update_version_info = catalog_update_info_.find(catalog_service_id)->second;
+      if (catalog_update_version_info.catalog_version >= catalog_update_version) break;
+      catalog_version_update_cv_.Wait(unique_lock);
   }
 
-  if (catalog_update_info_.catalog_service_id != catalog_service_id) {
-    VLOG_QUERY << "Detected change in catalog service ID";
+  if (catalog_update_info_.count(catalog_service_id) == 0) {
+      VLOG_QUERY << "Detected a missing catalog service ID. Potentially because " << catalog_service_id
+                 << " does not exist anymore";
   } else {
-    VLOG_QUERY << "Received catalog version: " << catalog_update_version;
+      VLOG_QUERY
+      << "Received catalog version: " << catalog_update_version << " from catalog service " << catalog_service_id;
   }
 }
 
 void ImpalaServer::WaitForCatalogUpdateTopicPropagation(
     const TUniqueId& catalog_service_id) {
   unique_lock<mutex> unique_lock(catalog_version_lock_);
+  auto it = catalog_update_info_.find(catalog_service_id);
+  DCHECK(it != catalog_update_info_.end());
+  CatalogUpdateVersionInfo catalog_version_info_ = it->second;
   int64_t min_req_subscriber_topic_version =
-      catalog_update_info_.catalog_topic_version;
+          catalog_version_info_.catalog_topic_version;
   VLOG_QUERY << "Waiting for min subscriber topic version: "
       << min_req_subscriber_topic_version << " current version: "
       << min_subscriber_catalog_topic_version_;
-  while (min_subscriber_catalog_topic_version_ < min_req_subscriber_topic_version &&
-         catalog_update_info_.catalog_service_id == catalog_service_id) {
+  while (catalog_update_info_.count(catalog_service_id) > 0) {
+    if (min_subscriber_catalog_topic_version_ >= min_req_subscriber_topic_version) break;
     catalog_version_update_cv_.Wait(unique_lock);
   }
 
-  if (catalog_update_info_.catalog_service_id != catalog_service_id) {
+  if (catalog_update_info_.count(catalog_service_id) == 0) {
     VLOG_QUERY << "Detected change in catalog service ID";
   } else {
     VLOG_QUERY << "Received min subscriber topic version: "
@@ -1648,20 +1666,24 @@ void ImpalaServer::WaitForCatalogUpdateTopicPropagation(
 void ImpalaServer::WaitForMinCatalogUpdate(const int64_t min_req_catalog_object_version,
     const TUniqueId& catalog_service_id) {
   unique_lock<mutex> unique_lock(catalog_version_lock_);
+  auto it = catalog_update_info_.find(catalog_service_id);
+  DCHECK(it != catalog_update_info_.end());
+  CatalogUpdateVersionInfo catalog_version_info_ = it->second;
   int64_t catalog_object_version_lower_bound =
-      catalog_update_info_.catalog_object_version_lower_bound;
+          catalog_version_info_.catalog_object_version_lower_bound;
   // TODO: Set a timeout to eventually break out of this loop if something goes
   //  wrong?
   VLOG_QUERY << "Waiting for local minimum catalog object version to be > "
       << min_req_catalog_object_version << ", current lower bound of local versions: "
       << catalog_object_version_lower_bound;
-  while (catalog_update_info_.catalog_service_id == catalog_service_id
-      && catalog_update_info_.catalog_object_version_lower_bound <=
-          min_req_catalog_object_version) {
+  while (catalog_update_info_.count(catalog_service_id) > 0) {
+      catalog_version_info_ = catalog_update_info_.find(catalog_service_id)->second;
+      if (catalog_version_info_.catalog_object_version_lower_bound >
+          min_req_catalog_object_version) break;
     catalog_version_update_cv_.Wait(unique_lock);
   }
 
-  if (catalog_update_info_.catalog_service_id != catalog_service_id) {
+  if (catalog_update_info_.count(catalog_service_id) == 0) {
     VLOG_QUERY << "Detected change in catalog service ID";
   } else {
     VLOG_QUERY << "Updated catalog object version lower bound: "

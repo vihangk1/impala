@@ -87,6 +87,8 @@ DECLARE_int32(num_expected_executors);
 DECLARE_int32(num_check_authorization_threads);
 DECLARE_bool(use_customized_user_groups_mapper_for_ranger);
 DECLARE_bool(enable_column_masking);
+DECLARE_int32(num_catalog_servers);
+DECLARE_string(catalog_server_node_ids);
 
 namespace impala {
 

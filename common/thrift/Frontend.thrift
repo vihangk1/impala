@@ -769,14 +769,14 @@ struct TUpdateCatalogCacheRequest {
 
 // Response from a TUpdateCatalogCacheRequest.
 struct TUpdateCatalogCacheResponse {
-  // The catalog service id this version is from.
-  1: required Types.TUniqueId catalog_service_id
+    // The catalog service id this version is from.
+    1: required Types.TUniqueId catalog_service_id
 
-  // The lower bound of catalog object versions after CatalogUpdate() was processed.
-  2: required i64 catalog_object_version_lower_bound
+    // The lower bound of catalog object versions after CatalogUpdate() was processed.
+    2: required i64 catalog_object_version_lower_bound
 
-  // The updated catalog version needed by the backend.
-  3: required i64 new_catalog_version
+    // The updated catalog version needed by the backend.
+    3: required i64 new_catalog_version
 }
 
 // Sent from the impalad BE to FE with the latest membership snapshot of the

@@ -788,7 +788,10 @@ public class CatalogServiceCatalog extends Catalog {
         getDeletedObjects(ctx.fromVersion, ctx.toVersion)) {
       if (!ctx.updatedCatalogObjects.contains(
           Catalog.toCatalogObjectKey(removedObject))) {
-        ctx.addCatalogObject(removedObject, true);
+        if (removedObject.getType().equals(TCatalogObjectType.FUNCTION)
+            && shouldIncludeInDelta(removedObject.getFn().getName().db_name)) {
+          ctx.addCatalogObject(removedObject, true);
+        }
       }
     }
     // Each topic update should contain a single "TCatalog" object which is used to
@@ -1037,7 +1040,8 @@ public class CatalogServiceCatalog extends Catalog {
   private void addDatabaseToCatalogDelta(Db db, GetCatalogDeltaContext ctx)
       throws TException {
     long dbVersion = db.getCatalogVersion();
-    if (dbVersion > ctx.fromVersion && dbVersion <= ctx.toVersion) {
+    if (dbVersion > ctx.fromVersion && dbVersion <= ctx.toVersion && shouldIncludeInDelta(
+        db)) {
       TCatalogObject catalogDb =
           new TCatalogObject(TCatalogObjectType.DATABASE, dbVersion);
       catalogDb.setDb(db.toThrift());
@@ -1046,9 +1050,21 @@ public class CatalogServiceCatalog extends Catalog {
     for (Table tbl: getAllTables(db)) {
       addTableToCatalogDelta(tbl, ctx);
     }
+    if (!shouldIncludeInDelta(db)) return;
     for (Function fn: getAllFunctions(db)) {
       addFunctionToCatalogDelta(fn, ctx);
     }
+  }
+
+  private boolean shouldIncludeInDelta(CatalogObject catalogObject) {
+    return shouldIncludeInDelta(catalogObject.getName());
+  }
+
+  private boolean shouldIncludeInDelta(String name) {
+    for (Integer nodeId : BackendConfig.INSTANCE.getNodeIds()) {
+      if (name.hashCode() % nodeId == 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -1190,6 +1206,7 @@ public class CatalogServiceCatalog extends Catalog {
    */
   private void addTableToCatalogDeltaHelper(Table tbl, GetCatalogDeltaContext ctx)
       throws TException {
+    if (!shouldIncludeInDelta(tbl)) return;
     TCatalogObject catalogTbl =
         new TCatalogObject(TCatalogObjectType.TABLE, Catalog.INITIAL_CATALOG_VERSION);
     tbl.getLock().lock();
@@ -1245,7 +1262,9 @@ public class CatalogServiceCatalog extends Catalog {
   private void addDataSourceToCatalogDelta(DataSource dataSource,
       GetCatalogDeltaContext ctx) throws TException  {
     long dsVersion = dataSource.getCatalogVersion();
-    if (ctx.versionNotInRange(dsVersion)) return;
+    if (ctx.versionNotInRange(dsVersion) || !shouldIncludeInDelta(dataSource)) {
+      return;
+    }
     TCatalogObject catalogObj =
         new TCatalogObject(TCatalogObjectType.DATA_SOURCE, dsVersion);
     catalogObj.setData_source(dataSource.toThrift());
@@ -1259,7 +1278,7 @@ public class CatalogServiceCatalog extends Catalog {
   private void addHdfsCachePoolToCatalogDelta(HdfsCachePool cachePool,
       GetCatalogDeltaContext ctx) throws TException  {
     long cpVersion = cachePool.getCatalogVersion();
-    if (ctx.versionNotInRange(cpVersion)) return;
+    if (ctx.versionNotInRange(cpVersion) || !shouldIncludeInDelta(cachePool)) return;
     TCatalogObject pool =
         new TCatalogObject(TCatalogObjectType.HDFS_CACHE_POOL, cpVersion);
     pool.setCache_pool(cachePool.toThrift());
@@ -1275,7 +1294,7 @@ public class CatalogServiceCatalog extends Catalog {
   private void addPrincipalToCatalogDelta(Principal principal, GetCatalogDeltaContext ctx)
       throws TException {
     long principalVersion = principal.getCatalogVersion();
-    if (!ctx.versionNotInRange(principalVersion)) {
+    if (!ctx.versionNotInRange(principalVersion) || !shouldIncludeInDelta(principal)) {
       TCatalogObject thriftPrincipal =
           new TCatalogObject(TCatalogObjectType.PRINCIPAL, principalVersion);
       thriftPrincipal.setPrincipal(principal.toThrift());

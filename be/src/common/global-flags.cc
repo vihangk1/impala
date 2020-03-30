@@ -329,6 +329,11 @@ DEFINE_bool_hidden(use_customized_user_groups_mapper_for_ranger, false,
 DEFINE_bool(enable_column_masking, true,
     "If false, disable the column masking feature. Defaults to be true.");
 
+DEFINE_int32(num_catalog_servers, 1,
+            "Defines the number of catalog servers in the cluster. Defaults to 1 which means there is no HA.");
+
+DEFINE_string(catalog_server_node_ids, "",
+             "Defines the node ids on the consistent hash ring of the catalog server.");
 // ++========================++
 // || Startup flag graveyard ||
 // ++========================++

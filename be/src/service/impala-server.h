@@ -1333,7 +1333,9 @@ class ImpalaServer : public ImpalaServiceIf,
   };
 
   /// The version information from the last successfull call to UpdateCatalog().
-  CatalogUpdateVersionInfo catalog_update_info_;
+  typedef std::unordered_map<TUniqueId, CatalogUpdateVersionInfo> CatalogUpdateVersionInfoMap;
+
+  CatalogUpdateVersionInfoMap catalog_update_info_;
 
   /// The current minimum topic version processed across all subscribers of the catalog
   /// topic. Used to determine when other nodes have successfully processed a catalog
