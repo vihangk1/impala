@@ -68,6 +68,7 @@ import org.apache.impala.thrift.TStatus;
 import org.apache.impala.thrift.TUniqueId;
 import org.apache.impala.thrift.TUpdateCatalogRequest;
 import org.apache.impala.thrift.TBackendGflags;
+import org.apache.impala.thrift.TUpdateRingNodeRequest;
 import org.apache.impala.thrift.TUpdateTableUsageRequest;
 import org.apache.impala.util.AuthorizationUtil;
 import org.apache.impala.util.GlogAppender;
@@ -363,6 +364,12 @@ public class JniCatalog {
     TUpdateTableUsageRequest thriftReq = new TUpdateTableUsageRequest();
     JniUtil.deserializeThrift(protocolFactory_, thriftReq, req);
     catalog_.updateTableUsage(thriftReq);
+  }
+
+  public void updateRingNode(byte[] req) throws ImpalaException {
+    TUpdateRingNodeRequest thriftReq = new TUpdateRingNodeRequest();
+    JniUtil.deserializeThrift(protocolFactory_, thriftReq, req);
+    catalog_.updateRingNode(thriftReq);
   }
 
   public byte[] getCatalogServerMetrics() throws ImpalaException, TException {

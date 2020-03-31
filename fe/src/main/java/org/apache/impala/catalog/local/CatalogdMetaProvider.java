@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.MetaException;
@@ -297,6 +298,14 @@ public class CatalogdMetaProvider implements MetaProvider {
      * updateCatalogCache()).
      */
     private Long lastResetCatalogVersion_ = -1L;
+
+    @Override
+    public String toString() {
+      return "CatalogServiceUpdateInfo{" +
+          "lastSeenCatalogVersion_=" + lastSeenCatalogVersion_ +
+          ", lastResetCatalogVersion_=" + lastResetCatalogVersion_ +
+          '}';
+    }
   }
 
   /**
@@ -1172,6 +1181,8 @@ public class CatalogdMetaProvider implements MetaProvider {
         lastSeenVersion =
             catalogServiceUpdates_.get(catalogServiceId).lastSeenCatalogVersion_;
       }
+      LOG.info("Current view of catalog service update map {}",
+          StringUtils.join(catalogServiceUpdates_));
     }
     deletedObjectsLog_.garbageCollect(lastResetVersion);
 

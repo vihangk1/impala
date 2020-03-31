@@ -539,6 +539,16 @@ struct TUpdateTableUsageResponse {
   1: optional Status.TStatus status
 }
 
+struct TUpdateRingNodeRequest {
+  // TODO we may have to rename this serviceUrl
+  1: required string serviceId
+  2: required bool removed = false
+}
+
+struct TUpdateRingNodeResponse {
+  1: required Status.TStatus status
+}
+
 // The CatalogService API
 service CatalogService {
   // Executes a DDL request and returns details on the result of the operation.

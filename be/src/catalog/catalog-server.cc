@@ -303,7 +303,15 @@ void CatalogServer::UpdateCatalogMembershipCallback(
         const TTopicDelta& update = topic->second;
         if (!update.topic_entries.empty()) {
             for (const TTopicItem& item : update.topic_entries) {
-                LOG(INFO) << "VIHANG-DEBUG: Item key: " << item.key << " value: " << item.value;
+                //LOG(INFO) << "VIHANG-DEBUG: Item key: " << item.key << " value: " << item.value;
+                TUpdateRingNodeRequest req;
+                req.removed = false;
+                // need to decide if we want to use serviceUrl or serviceId
+                req.serviceId = item.key;
+                Status s = catalog_->UpdateRingNode(req);
+                if (!s.ok()) {
+                    LOG(ERROR) << "Failed the update the consistent hash ring for " << item.key;
+                }
             }
         } else {
             LOG(INFO) << "VIHANG-DEBUG: topic entries is empty";

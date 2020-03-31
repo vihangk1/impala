@@ -87,6 +87,7 @@ import org.apache.impala.thrift.TTableName;
 import org.apache.impala.thrift.TTableUsage;
 import org.apache.impala.thrift.TTableUsageMetrics;
 import org.apache.impala.thrift.TUniqueId;
+import org.apache.impala.thrift.TUpdateRingNodeRequest;
 import org.apache.impala.thrift.TUpdateTableUsageRequest;
 import org.apache.impala.util.CatalogBlacklistUtils;
 import org.apache.impala.util.FunctionUtils;
@@ -1067,9 +1068,9 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   private boolean shouldIncludeInDelta(String name) {
-    for (Integer nodeId : BackendConfig.INSTANCE.getNodeIds()) {
-      if (name.hashCode() % nodeId == 0) return true;
-    }
+    //TODO the c++ side of catalog-server should be aware of the serviceId
+    //Currently this check always returns false
+    //return ConsistentHashRing.INSTANCE.getServiceId(name).equals(catalogServiceId_);
     return false;
   }
 
@@ -3102,6 +3103,10 @@ public class CatalogServiceCatalog extends Catalog {
       }
       if (table != null) table.refreshLastUsedTime();
     }
+  }
+
+  public void updateRingNode(TUpdateRingNodeRequest req) {
+    ConsistentHashRing.INSTANCE.updateNode(req.serviceId, req.removed);
   }
 
   CatalogdTableInvalidator getCatalogdTableInvalidator() {

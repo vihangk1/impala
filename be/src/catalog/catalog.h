@@ -138,6 +138,9 @@ class Catalog {
   /// report.
   Status UpdateTableUsage(const TUpdateTableUsageRequest& req);
 
+  /// updates the catalog's consistent hash ring based on catalog membership topic updates
+  Status UpdateRingNode(const TUpdateRingNodeRequest& req);
+
  private:
   /// Descriptor of Java Catalog class itself, used to create a new instance.
   jclass catalog_class_;
@@ -163,6 +166,7 @@ class Catalog {
   jmethodID sentry_admin_check_id_; // JniCatalog.checkUserSentryAdmin()
   jmethodID catalog_ctor_;
   jmethodID update_table_usage_id_;
+  jmethodID update_ring_node_id_; // JniCatalog.updateRingNode()
 };
 
 }

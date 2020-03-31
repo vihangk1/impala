@@ -73,6 +73,7 @@ Catalog::Catalog() {
     {"prioritizeLoad", "([B)V", &prioritize_load_id_},
     {"getPartitionStats", "([B)[B", &get_partition_stats_id_},
     {"updateTableUsage", "([B)V", &update_table_usage_id_},
+    {"updateRingNode", "([B)V", &update_ring_node_id_},
   };
 
   JNIEnv* jni_env = JniUtil::GetJNIEnv();
@@ -196,4 +197,8 @@ Status Catalog::SentryAdminCheck(const TSentryAdminCheckRequest& req,
 
 Status Catalog::UpdateTableUsage(const TUpdateTableUsageRequest& req) {
   return JniUtil::CallJniMethod(catalog_, update_table_usage_id_, req);
+}
+
+Status Catalog::UpdateRingNode(const TUpdateRingNodeRequest& req) {
+    return JniUtil::CallJniMethod(catalog_, update_ring_node_id_, req);
 }
