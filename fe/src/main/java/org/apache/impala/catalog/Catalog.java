@@ -652,7 +652,11 @@ public abstract class Catalog implements AutoCloseable {
         return "AUTHZ_CACHE_INVALIDATION:" + catalogObject.getAuthz_cache_invalidation()
             .getMarker_name().toLowerCase();
       case CATALOG:
-        return "CATALOG_SERVICE_ID";
+        //TODO when calls come from coordinator the type is set as CATALOG but the
+        // object is not set.
+        if (catalogObject.getCatalog() == null) return "CATALOG_SERVICE_ID";
+        //return "CATALOG_SERVICE_ID";
+        return "CATALOG_SERVICE_ID:" + catalogObject.getCatalog().catalog_service_id;
       default:
         throw new IllegalStateException(
             "Unsupported catalog object type: " + catalogObject.getType());

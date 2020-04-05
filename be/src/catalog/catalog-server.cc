@@ -316,13 +316,13 @@ void CatalogServer::UpdateCatalogMembershipCallback(
         } else {
             LOG(INFO) << "VIHANG-DEBUG: topic entries is empty";
         }
-        LOG(INFO) << "VIHANG-DEBUG: Received cluster membership update";
+        //LOG(INFO) << "VIHANG-DEBUG: Received cluster membership update";
     }
     AddCatalogServerStatusToStatestore(subscriber_topic_updates);
 }
 
 void CatalogServer::AddCatalogServerStatusToStatestore(vector<TTopicDelta>* subscriber_topic_updates) {
-    LOG(INFO) << "VIHANG-DEBUG: Sending catalog server info to statestore";
+    //LOG(INFO) << "VIHANG-DEBUG: Sending catalog server info to statestore";
     subscriber_topic_updates->emplace_back(TTopicDelta());
     TTopicDelta& update = subscriber_topic_updates->back();
     update.topic_name = Statestore::IMPALA_CATALOG_MEMBERSHIP_TOPIC;
@@ -334,7 +334,7 @@ void CatalogServer::AddCatalogServerStatusToStatestore(vector<TTopicDelta>* subs
     TTopicItem& item = update.topic_entries.back();
     TNetworkAddress server_address = MakeNetworkAddress(FLAGS_hostname,
                                                         FLAGS_catalog_service_port);
-    string itemKey = Substitute("catalog-server@$0", TNetworkAddressToString(server_address));
+    string itemKey = TNetworkAddressToString(server_address);
     item.key = itemKey;
     item.value = itemKey;
 }
@@ -390,7 +390,8 @@ void CatalogServer::UpdateCatalogTopicCallback(
     // update topic. This is to guarantee that upon catalog restart, the
     // statestore entries of the catalog update topic are in sync with the
     // catalog objects stored in the catalog (see IMPALA-6948).
-    update.__set_clear_topic_entries((last_sent_catalog_version_ == 0));
+    // TODO(Vihang) this is probably not needed in catalog-v2 mode
+    // update.__set_clear_topic_entries((last_sent_catalog_version_ == 0));
 
     VLOG(1) << "A catalog update with " << update.topic_entries.size()
             << " entries is assembled. Catalog version: "

@@ -159,4 +159,8 @@ struct TBackendGflags {
   67: required i32 num_catalog_servers
 
   68: required string catalog_server_node_ids
+  
+  69: required i32 catalog_service_port
+
+  70: required string catalog_service_hostname
 }

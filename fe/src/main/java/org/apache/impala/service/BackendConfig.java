@@ -238,6 +238,15 @@ public class BackendConfig {
     return (backendCfg_.is_executor == false) && (backendCfg_.is_coordinator == true);
   }
 
+  public String getHostname() {
+    return Preconditions.checkNotNull(backendCfg_.catalog_service_hostname);
+  }
+
+  public int getCatalogServicePort() {
+    Preconditions.checkState(backendCfg_.catalog_service_port > 0);
+    return backendCfg_.catalog_service_port;
+  }
+
   public int getNumberOfCatalogServers() {
     return backendCfg_.num_catalog_servers;
   }

@@ -279,6 +279,8 @@ public class CatalogServiceCatalog extends Catalog {
   private final Set<String> blacklistedDbs_;
   // Tables that will be skipped in loading.
   private final Set<TableName> blacklistedTables_;
+  // catalog service address (hostname:port)
+  private final String catalogServiceAddress_;
 
   /**
    * Initialize the CatalogServiceCatalog using a given MetastoreClientPool impl.
@@ -298,6 +300,9 @@ public class CatalogServiceCatalog extends Catalog {
     blacklistedTables_ = CatalogBlacklistUtils.parseBlacklistedTables(
         BackendConfig.INSTANCE.getBlacklistedTables(), LOG);
     catalogServiceId_ = catalogServiceId;
+    catalogServiceAddress_ =
+        BackendConfig.INSTANCE.getHostname() + ":" + BackendConfig.INSTANCE
+            .getCatalogServicePort();
     tableLoadingMgr_ = new TableLoadingMgr(this, numLoadingThreads);
     loadInBackground_ = loadInBackground;
     try {
@@ -1048,7 +1053,7 @@ public class CatalogServiceCatalog extends Catalog {
       throws TException {
     long dbVersion = db.getCatalogVersion();
     if (dbVersion > ctx.fromVersion && dbVersion <= ctx.toVersion && shouldIncludeInDelta(
-        db)) {
+        db.getUniqueName())) {
       TCatalogObject catalogDb =
           new TCatalogObject(TCatalogObjectType.DATABASE, dbVersion);
       catalogDb.setDb(db.toThrift());
@@ -1057,21 +1062,17 @@ public class CatalogServiceCatalog extends Catalog {
     for (Table tbl: getAllTables(db)) {
       addTableToCatalogDelta(tbl, ctx);
     }
-    if (!shouldIncludeInDelta(db)) return;
+    // all the functions are currently mapped to the catalog node which is responsible
+    // for that dbObject
+    if (!shouldIncludeInDelta(db.getUniqueName())) return;
     for (Function fn: getAllFunctions(db)) {
       addFunctionToCatalogDelta(fn, ctx);
     }
   }
 
-  private boolean shouldIncludeInDelta(CatalogObject catalogObject) {
-    return shouldIncludeInDelta(catalogObject.getName());
-  }
-
   private boolean shouldIncludeInDelta(String name) {
-    //TODO the c++ side of catalog-server should be aware of the serviceId
-    //Currently this check always returns false
-    //return ConsistentHashRing.INSTANCE.getServiceId(name).equals(catalogServiceId_);
-    return false;
+    return ConsistentHashRing.INSTANCE.getServiceId(name)
+        .equals(catalogServiceAddress_);
   }
 
   /**
@@ -1213,7 +1214,7 @@ public class CatalogServiceCatalog extends Catalog {
    */
   private void addTableToCatalogDeltaHelper(Table tbl, GetCatalogDeltaContext ctx)
       throws TException {
-    if (!shouldIncludeInDelta(tbl)) return;
+    if (!shouldIncludeInDelta(tbl.getFullName())) return;
     TCatalogObject catalogTbl =
         new TCatalogObject(TCatalogObjectType.TABLE, Catalog.INITIAL_CATALOG_VERSION);
     tbl.getLock().lock();
@@ -1269,7 +1270,7 @@ public class CatalogServiceCatalog extends Catalog {
   private void addDataSourceToCatalogDelta(DataSource dataSource,
       GetCatalogDeltaContext ctx) throws TException  {
     long dsVersion = dataSource.getCatalogVersion();
-    if (ctx.versionNotInRange(dsVersion) || !shouldIncludeInDelta(dataSource)) {
+    if (ctx.versionNotInRange(dsVersion) || !shouldIncludeInDelta(dataSource.getUniqueName())) {
       return;
     }
     TCatalogObject catalogObj =
@@ -1285,7 +1286,10 @@ public class CatalogServiceCatalog extends Catalog {
   private void addHdfsCachePoolToCatalogDelta(HdfsCachePool cachePool,
       GetCatalogDeltaContext ctx) throws TException  {
     long cpVersion = cachePool.getCatalogVersion();
-    if (ctx.versionNotInRange(cpVersion) || !shouldIncludeInDelta(cachePool)) return;
+    if (ctx.versionNotInRange(cpVersion) || !shouldIncludeInDelta(
+        cachePool.getUniqueName())) {
+      return;
+    }
     TCatalogObject pool =
         new TCatalogObject(TCatalogObjectType.HDFS_CACHE_POOL, cpVersion);
     pool.setCache_pool(cachePool.toThrift());
@@ -1301,7 +1305,8 @@ public class CatalogServiceCatalog extends Catalog {
   private void addPrincipalToCatalogDelta(Principal principal, GetCatalogDeltaContext ctx)
       throws TException {
     long principalVersion = principal.getCatalogVersion();
-    if (!ctx.versionNotInRange(principalVersion) || !shouldIncludeInDelta(principal)) {
+    if (!ctx.versionNotInRange(principalVersion) || !shouldIncludeInDelta(
+        principal.getUniqueName())) {
       TCatalogObject thriftPrincipal =
           new TCatalogObject(TCatalogObjectType.PRINCIPAL, principalVersion);
       thriftPrincipal.setPrincipal(principal.toThrift());

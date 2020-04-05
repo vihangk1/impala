@@ -185,6 +185,8 @@ vector<Statestore::TopicEntry::Version> Statestore::Topic::Put(
       // Delete the old entry from the version history. There is no need to search the
       // version_history because there should only be at most a single entry in the
       // history at any given time.
+        LOG(INFO) << "Found topic entry which is pre-existing: " << entry.key << "Old value: "
+                  << entry_it->second.value() << "New value: " << entry.value;
       topic_update_log_.erase(entry_it->second.version());
       value_size_delta -= entry_it->second.value().size();
     }
@@ -246,6 +248,8 @@ void Statestore::Topic::BuildDelta(const SubscriberId& subscriber_id,
   // If the subscriber version is > 0, send this update as a delta. Otherwise, this is
   // a new subscriber so send them a non-delta update that includes all entries in the
   // topic.
+  //  VLOG_QUERY
+  //  << "Building topic delta for subscriber " << subscriber_id << ". Last processed version " << last_processed_version;
   delta->is_delta = last_processed_version > Subscriber::TOPIC_INITIAL_VERSION;
   delta->__set_from_version(last_processed_version);
   {
@@ -253,8 +257,9 @@ void Statestore::Topic::BuildDelta(const SubscriberId& subscriber_id,
     shared_lock<shared_mutex> read_lock(lock_);
     TopicUpdateLog::const_iterator next_update =
         topic_update_log_.upper_bound(last_processed_version);
-
+    // VLOG_QUERY << "Next update is empty: " << (next_update != topic_update_log_.end() ? "False" : "True");
     uint64_t topic_size = 0;
+    uint32_t num_of_entries = 0;
     for (; next_update != topic_update_log_.end(); ++next_update) {
       TopicEntryMap::const_iterator itr = entries_.find(next_update->second);
       DCHECK(itr != entries_.end());
@@ -272,13 +277,15 @@ void Statestore::Topic::BuildDelta(const SubscriberId& subscriber_id,
       delta_entry.value = topic_entry.value();
       delta_entry.deleted = topic_entry.is_deleted();
       topic_size += delta_entry.key.size() + delta_entry.value.size();
+      num_of_entries += 1;
     }
 
     if (!delta->is_delta &&
         last_version_ > Subscriber::TOPIC_INITIAL_VERSION) {
       VLOG_QUERY << "Preparing initial " << delta->topic_name
                  << " topic update for " << subscriber_id << ". Size = "
-                 << PrettyPrinter::Print(topic_size, TUnit::BYTES);
+                 << PrettyPrinter::Print(topic_size, TUnit::BYTES) << " Number of entries = "
+                 << num_of_entries;
     }
 
     if (topic_update_log_.size() > 0) {
@@ -720,7 +727,7 @@ Status Statestore::SendTopicUpdate(Subscriber* subscriber, UpdateKind update_kin
         continue;
       }
 
-      VLOG_RPC << "Received update for topic " << update.topic_name
+      LOG(INFO) << "Received update for topic " << update.topic_name
                << " from  " << subscriber->id() << ", number of entries: "
                << update.topic_entries.size();
 

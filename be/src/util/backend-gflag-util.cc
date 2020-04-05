@@ -89,6 +89,8 @@ DECLARE_bool(use_customized_user_groups_mapper_for_ranger);
 DECLARE_bool(enable_column_masking);
 DECLARE_int32(num_catalog_servers);
 DECLARE_string(catalog_server_node_ids);
+DECLARE_int32(catalog_service_port);
+DECLARE_string(hostname);
 
 namespace impala {
 
@@ -180,6 +182,8 @@ Status GetThriftBackendGflags(JNIEnv* jni_env, jbyteArray* cfg_bytes) {
   cfg.__set_use_customized_user_groups_mapper_for_ranger(
       FLAGS_use_customized_user_groups_mapper_for_ranger);
   cfg.__set_enable_column_masking(FLAGS_enable_column_masking);
+  cfg.__set_catalog_service_port(FLAGS_catalog_service_port);
+  cfg.__set_catalog_service_hostname(FLAGS_hostname);
   RETURN_IF_ERROR(SerializeThriftMsg(jni_env, &cfg, cfg_bytes));
   return Status::OK();
 }
