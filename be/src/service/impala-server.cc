@@ -1579,29 +1579,36 @@ void ImpalaServer::CatalogUpdateCallback(
     // sources are dropped).
     LibCache::instance()->DropCache();
   } else {
+    bool catalog_ready = false;
     {
       unique_lock<mutex> unique_lock(catalog_version_lock_);
-      auto it = catalog_update_info_.find(resp.catalog_service_id);
-      if (it == catalog_update_info_.end()) {
-          catalog_update_info_.emplace(
-                  resp.catalog_service_id, CatalogUpdateVersionInfo());
+      for (auto& info : resp.catalog_update_infos) {
+          auto it = catalog_update_info_.find(info.catalog_service_id);
+          if (it == catalog_update_info_.end()) {
+              catalog_update_info_.emplace(
+                      info.catalog_service_id, CatalogUpdateVersionInfo());
+          }
+          if (!catalog_ready) {
+              catalog_ready = info.new_catalog_version > 0;
+          }
+
+          //TODO there must be a better way to do this
+          auto it2 = catalog_update_info_.find(info.catalog_service_id);
+          CatalogUpdateVersionInfo& catalog_update_version_info = it2->second;
+          if (catalog_update_version_info.catalog_version != info.new_catalog_version) {
+              LOG(INFO) << "Catalog topic update applied with version: " <<
+                        info.new_catalog_version << " new min catalog object version: " <<
+                        info.catalog_object_version_lower_bound;
+          }
+          catalog_update_version_info.catalog_version = info.new_catalog_version;
+          catalog_update_version_info.catalog_topic_version = delta.to_version;
+          catalog_update_version_info.catalog_service_id = info.catalog_service_id;
+          catalog_update_version_info.catalog_object_version_lower_bound =
+                  info.catalog_object_version_lower_bound;
+          catalog_update_version_info.UpdateCatalogVersionMetrics();
       }
-      //TODO there must be a better way to do this
-      auto it2 = catalog_update_info_.find(resp.catalog_service_id);
-      CatalogUpdateVersionInfo& catalog_update_version_info = it2->second;
-      if (catalog_update_version_info.catalog_version != resp.new_catalog_version) {
-        LOG(INFO) << "Catalog topic update applied with version: " <<
-            resp.new_catalog_version << " new min catalog object version: " <<
-            resp.catalog_object_version_lower_bound;
-      }
-      catalog_update_version_info.catalog_version = resp.new_catalog_version;
-      catalog_update_version_info.catalog_topic_version = delta.to_version;
-      catalog_update_version_info.catalog_service_id = resp.catalog_service_id;
-      catalog_update_version_info.catalog_object_version_lower_bound =
-        resp.catalog_object_version_lower_bound;
-      catalog_update_version_info.UpdateCatalogVersionMetrics();
     }
-    ImpaladMetrics::CATALOG_READY->SetValue(resp.new_catalog_version > 0);
+    ImpaladMetrics::CATALOG_READY->SetValue(catalog_ready);
     // TODO: deal with an error status
     discard_result(UpdateCatalogMetrics());
   }

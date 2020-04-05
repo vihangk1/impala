@@ -767,8 +767,7 @@ struct TUpdateCatalogCacheRequest {
   5: required i64 native_iterator_ptr
 }
 
-// Response from a TUpdateCatalogCacheRequest.
-struct TUpdateCatalogCacheResponse {
+struct TCatalogUpdateInfo {
     // The catalog service id this version is from.
     1: required Types.TUniqueId catalog_service_id
 
@@ -777,6 +776,11 @@ struct TUpdateCatalogCacheResponse {
 
     // The updated catalog version needed by the backend.
     3: required i64 new_catalog_version
+}
+
+// Response from a TUpdateCatalogCacheRequest.
+struct TUpdateCatalogCacheResponse {
+    1: list<TCatalogUpdateInfo> catalog_update_infos
 }
 
 // Sent from the impalad BE to FE with the latest membership snapshot of the

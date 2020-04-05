@@ -67,6 +67,7 @@ import org.apache.impala.thrift.TBackendGflags;
 import org.apache.impala.thrift.TCatalogInfoSelector;
 import org.apache.impala.thrift.TCatalogObject;
 import org.apache.impala.thrift.TCatalogObjectType;
+import org.apache.impala.thrift.TCatalogUpdateInfo;
 import org.apache.impala.thrift.TDatabase;
 import org.apache.impala.thrift.TDbInfoSelector;
 import org.apache.impala.thrift.TErrorCode;
@@ -1193,13 +1194,22 @@ public class CatalogdMetaProvider implements MetaProvider {
         StringUtils.join(catalogServiceUpdates_));
     if (catalogsWitnessed.isEmpty()) {
       // didn't witness any catalogs in this update.
-      return new TUpdateCatalogCacheResponse(Catalog.INITIAL_CATALOG_SERVICE_ID, 0L, 0L);
+      TCatalogUpdateInfo updateInfo =
+          new TCatalogUpdateInfo(Catalog.INITIAL_CATALOG_SERVICE_ID, 0L, 0L);
+      TUpdateCatalogCacheResponse resp = new TUpdateCatalogCacheResponse();
+      resp.addToCatalog_update_infos(updateInfo);
+      return resp;
     } else {
       //TODO need to send all the catalog service updates
-      CatalogServiceUpdateInfo last = catalogsWitnessed.get(catalogsWitnessed.size() - 1);
-      return new TUpdateCatalogCacheResponse(last.catalogServiceId_,
-          last.lastResetCatalogVersion_ + 1,
-          last.lastSeenCatalogVersion_);
+      TUpdateCatalogCacheResponse resp = new TUpdateCatalogCacheResponse();
+      for (CatalogServiceUpdateInfo catalogServiceUpdateInfo : catalogsWitnessed) {
+        TCatalogUpdateInfo updateInfo =
+            new TCatalogUpdateInfo(catalogServiceUpdateInfo.catalogServiceId_,
+                catalogServiceUpdateInfo.lastResetCatalogVersion_ + 1,
+                catalogServiceUpdateInfo.lastSeenCatalogVersion_);
+        resp.addToCatalog_update_infos(updateInfo);
+      }
+      return resp;
     }
   }
 

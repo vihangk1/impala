@@ -33,6 +33,7 @@ import org.apache.impala.service.FeSupport;
 import org.apache.impala.thrift.TAuthzCacheInvalidation;
 import org.apache.impala.thrift.TCatalogObject;
 import org.apache.impala.thrift.TCatalogObjectType;
+import org.apache.impala.thrift.TCatalogUpdateInfo;
 import org.apache.impala.thrift.TDataSource;
 import org.apache.impala.thrift.TDatabase;
 import org.apache.impala.thrift.TFunction;
@@ -237,8 +238,14 @@ public class ImpaladCatalog extends Catalog implements FeCatalog {
     synchronized (catalogUpdateEventNotifier_) {
       catalogUpdateEventNotifier_.notifyAll();
     }
-    return new TUpdateCatalogCacheResponse(catalogServiceId_,
-        CatalogObjectVersionSet.INSTANCE.getMinimumVersion(), newCatalogVersion);
+    TCatalogUpdateInfo updateInfo = new TCatalogUpdateInfo();
+    updateInfo.setCatalog_service_id(catalogServiceId_);
+    updateInfo.setCatalog_object_version_lower_bound(
+        CatalogObjectVersionSet.INSTANCE.getMinimumVersion());
+    updateInfo.setNew_catalog_version(newCatalogVersion);
+    TUpdateCatalogCacheResponse response = new TUpdateCatalogCacheResponse();
+    response.catalog_update_infos.add(updateInfo);
+    return response;
   }
 
 
