@@ -283,6 +283,7 @@ public class CatalogdMetaProvider implements MetaProvider {
      * version has been distributed to all coordinators before proceeding.
      */
     private Long lastSeenCatalogVersion_ = Catalog.INITIAL_CATALOG_VERSION;
+    private TUniqueId catalogServiceId_ = Catalog.INITIAL_CATALOG_SERVICE_ID;
 
     /**
      * The catalog version at last time when catalogd starts resetting the entire catalog.
@@ -298,6 +299,13 @@ public class CatalogdMetaProvider implements MetaProvider {
      * updateCatalogCache()).
      */
     private Long lastResetCatalogVersion_ = -1L;
+
+    public CatalogServiceUpdateInfo(TUniqueId catalog_service_id, Long catalog_version,
+        Long last_reset_catalog_version) {
+      catalogServiceId_ = Preconditions.checkNotNull(catalog_service_id);
+      lastSeenCatalogVersion_ = Preconditions.checkNotNull(catalog_version);
+      lastResetCatalogVersion_ = Preconditions.checkNotNull(last_reset_catalog_version);
+    }
 
     @Override
     public String toString() {
@@ -1056,20 +1064,15 @@ public class CatalogdMetaProvider implements MetaProvider {
    */
   public synchronized TUpdateCatalogCacheResponse updateCatalogCache(
       TUpdateCatalogCacheRequest req) {
-    TUniqueId catalogServiceId = null;
     if (req.isSetCatalog_service_id()) {
-      //TODO(Vihang): Do we even ever set this?
-      catalogServiceId = req.catalog_service_id;
+      //TODO(Vihang) need to understand if this resetStartVersion here makes sense
       witnessCatalogServiceId(req.catalog_service_id);
     }
 
     // We might see a top-level catalog version number while visiting the objects. If so,
     // we'll capture it here and process it down at the end after applying all other
     // objects.
-    Long nextCatalogVersion = null;
-    Long lastSeenVersion = 0L;
-    Long lastResetVersion = -1L;
-    long resetStartVersion = -1L;
+    List<CatalogServiceUpdateInfo> catalogsWitnessed = new ArrayList<>();
 
     ObjectUpdateSequencer authObjectSequencer = new ObjectUpdateSequencer();
 
@@ -1089,6 +1092,10 @@ public class CatalogdMetaProvider implements MetaProvider {
         continue;
       }
       if (isDelete) {
+        //TODO(Vihang) this needs to be figured out. eg. if an object was added in one
+        // catalog but was removed from another AND if the removed object had a lower
+        // catalog version then this logic will fail. Need to understand how and when
+        // this would happen.
         deletedObjectsLog_.addRemovedObject(obj);
       } else if (deletedObjectsLog_.wasObjectRemovedAfter(obj)) {
         LOG.trace("Skipping update because a matching object was removed " +
@@ -1126,31 +1133,13 @@ public class CatalogdMetaProvider implements MetaProvider {
         // of this call. This is also used to know when the catalog is ready at
         // startup.
         LOG.info(
-            "Received catalog object. Version: {}, serviceId: {}, lastResetVersion: {}",
-            obj.catalog_version, obj.catalog.catalog_service_id,
+            "Received catalog object in topic update. Version: {}, serviceId: {}, "
+                + "lastResetVersion: {}", obj.catalog_version,
+            obj.catalog.catalog_service_id,
             obj.catalog.last_reset_catalog_version);
-        nextCatalogVersion = obj.catalog_version;
-        catalogServiceId = obj.catalog.catalog_service_id.deepCopy();
-        LOG.info("Setting local variable catalogServiceId to {}", catalogServiceId);
         witnessCatalogServiceId(obj.catalog.catalog_service_id);
-        resetStartVersion = obj.catalog.last_reset_catalog_version;
-        synchronized (catalogServiceIdLock_) {
-          //TODO(Vihang) probably a race here.
-          Preconditions.checkNotNull(catalogServiceId, "Catalog service id should not "
-              + "be null if catalog object is found in the update");
-          Preconditions.checkState(catalogServiceUpdates_.containsKey(catalogServiceId)
-              , "Did not find service id " + catalogServiceId + " in catalog service "
-                  + "update map");
-          if (catalogServiceUpdates_
-              .get(obj.catalog.catalog_service_id).lastResetCatalogVersion_
-              != resetStartVersion) {
-            // Detected a new reset() finishes in Catalogd, clear the cache in case some
-            // tables are skipped in this topic update.
-            cache_.invalidateAll();
-          }
-          catalogServiceUpdates_.get(
-              obj.catalog.catalog_service_id).lastResetCatalogVersion_ = resetStartVersion;
-        }
+        catalogsWitnessed.add(new CatalogServiceUpdateInfo(obj.catalog.catalog_service_id,
+            obj.catalog_version, obj.catalog.last_reset_catalog_version));
       }
     }
 
@@ -1165,26 +1154,34 @@ public class CatalogdMetaProvider implements MetaProvider {
     // end of the loop, since the CATALOG object might be one of the first objects
     // processed, and we don't want to prematurely indicate that we are done processing
     // the update.
-    synchronized (catalogServiceIdLock_) {
-      if (nextCatalogVersion != null) {
-        Preconditions.checkNotNull(catalogServiceId);
-        Preconditions.checkState(catalogServiceUpdates_.containsKey(catalogServiceId),
-            "Catalog service updates does not contain service id " + catalogServiceId);
-        catalogServiceUpdates_.get(catalogServiceId).lastSeenCatalogVersion_
-            = nextCatalogVersion;
+    if (!catalogsWitnessed.isEmpty()) {
+      synchronized (catalogServiceIdLock_) {
+        for (CatalogServiceUpdateInfo catalogServiceUpdateInfo : catalogsWitnessed) {
+          TUniqueId catalogServiceId = catalogServiceUpdateInfo.catalogServiceId_;
+          long resetStartVersion = catalogServiceUpdateInfo.lastResetCatalogVersion_;
+          long nextCatalogVersion = catalogServiceUpdateInfo.lastSeenCatalogVersion_;
+          if (!catalogServiceUpdates_.containsKey(catalogServiceId)) {
+            catalogServiceUpdates_.put(catalogServiceId,
+                catalogServiceUpdateInfo);
+          } else if (catalogServiceUpdates_
+              .get(catalogServiceId).lastResetCatalogVersion_ != resetStartVersion) {
+            // Detected a new reset() finishes in Catalogd, clear the cache in case some
+            // tables are skipped in this topic update.
+            LOG.info("Detected a change in last reset version of catalog {} from {} to "
+                    + "{}. Invalidating all cache", catalogServiceId,
+                catalogServiceUpdates_
+                    .get(catalogServiceId).lastResetCatalogVersion_, resetStartVersion);
+            cache_.invalidateAll();
+            catalogServiceUpdates_
+                .get(catalogServiceId).lastResetCatalogVersion_ = resetStartVersion;
+          }
+          catalogServiceUpdates_.get(catalogServiceId).lastSeenCatalogVersion_
+              = nextCatalogVersion;
+        }
       }
-      if (catalogServiceId == null) {
-        catalogServiceId = Catalog.INITIAL_CATALOG_SERVICE_ID;
-      } else {
-        lastResetVersion =
-            catalogServiceUpdates_.get(catalogServiceId).lastResetCatalogVersion_;
-        lastSeenVersion =
-            catalogServiceUpdates_.get(catalogServiceId).lastSeenCatalogVersion_;
-      }
-      LOG.info("Current view of catalog service update map {}",
-          StringUtils.join(catalogServiceUpdates_));
     }
-    deletedObjectsLog_.garbageCollect(lastResetVersion);
+    //TODO(Vihang) Uncomment this.
+    //deletedObjectsLog_.garbageCollect(lastResetVersion);
 
     // NOTE: the return value is ignored when this function is called by a DDL
     // operation.
@@ -1192,9 +1189,18 @@ public class CatalogdMetaProvider implements MetaProvider {
     // catalog objects with catalog version <= lastResetCatalogVersion_ should have
     // been invalidated. See more comments above the definition of
     // lastResetCatalogVersion_.
-    return new TUpdateCatalogCacheResponse(catalogServiceId,
-        lastResetVersion + 1,
-        lastSeenVersion);
+    LOG.info("Current view of catalog service update map {}",
+        StringUtils.join(catalogServiceUpdates_));
+    if (catalogsWitnessed.isEmpty()) {
+      // didn't witness any catalogs in this update.
+      return new TUpdateCatalogCacheResponse(Catalog.INITIAL_CATALOG_SERVICE_ID, 0L, 0L);
+    } else {
+      //TODO need to send all the catalog service updates
+      CatalogServiceUpdateInfo last = catalogsWitnessed.get(catalogsWitnessed.size() - 1);
+      return new TUpdateCatalogCacheResponse(last.catalogServiceId_,
+          last.lastResetCatalogVersion_ + 1,
+          last.lastSeenCatalogVersion_);
+    }
   }
 
   private void updateAuthPolicy(TCatalogObject obj, boolean isDelete) {
@@ -1255,18 +1261,13 @@ public class CatalogdMetaProvider implements MetaProvider {
    * If we notice the service ID changed, we need to invalidate our cache.
    */
   private void witnessCatalogServiceId(TUniqueId serviceId) {
+    Preconditions.checkNotNull(serviceId, "Catalog service id should not "
+        + "be null if catalog object is found in the update");
     synchronized (catalogServiceIdLock_) {
       if (!catalogServiceUpdates_.containsKey(serviceId)) {
-        if (!catalogServiceUpdates_.isEmpty()) {
           LOG.warn("Detected a new catalog service: service ID {} sent an update for " +
               "for the first time. Invalidating all cached metadata on this coordinator."
               ,serviceId);
-        } else {
-          LOG.info(
-              "VIHANG-DEBUG: Adding catalog service id {} to catalogServiceUpdates map",
-              serviceId);
-        }
-        catalogServiceUpdates_.put(serviceId, new CatalogServiceUpdateInfo());
         cache_.invalidateAll();
         // TODO(todd): we probably need to invalidate the auth policy too.
         // we are probably better off detecting this at a higher level and

@@ -344,6 +344,7 @@ public class CatalogOpExecutor {
     TDdlType ddl_type = ddlRequest.ddl_type;
     try {
       boolean syncDdl = ddlRequest.isSync_ddl();
+      LOG.info("Received a DDL request of type: {} SyncDDL: {}", ddl_type, syncDdl);
       switch (ddl_type) {
         case ALTER_DATABASE:
           TAlterDbParams alter_db_params = ddlRequest.getAlter_db_params();

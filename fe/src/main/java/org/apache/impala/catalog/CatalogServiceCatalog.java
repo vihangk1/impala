@@ -648,6 +648,7 @@ public class CatalogServiceCatalog extends Catalog {
     long fromVersion;
     long toVersion;
     long lastResetStartVersion;
+    int numOfObjects;
     // The keys of the updated topics.
     Set<String> updatedCatalogObjects;
     TSerializer serializer;
@@ -664,6 +665,7 @@ public class CatalogServiceCatalog extends Catalog {
     }
 
     void addCatalogObject(TCatalogObject obj, boolean delete) throws TException {
+      numOfObjects++;
       String key = Catalog.toCatalogObjectKey(obj);
       if (obj.type != TCatalogObjectType.CATALOG) {
         topicUpdateLog_.add(key,
@@ -825,6 +827,9 @@ public class CatalogServiceCatalog extends Catalog {
     synchronized (topicUpdateLog_) {
       topicUpdateLog_.notifyAll();
     }
+    LOG.info("Returning from getCatalogDelta of catalog service {} with id {}. Number "
+            + "of objects in delta update {}", catalogServiceAddress_, catalogServiceId_,
+        ctx.numOfObjects);
     return ctx.toVersion;
   }
 

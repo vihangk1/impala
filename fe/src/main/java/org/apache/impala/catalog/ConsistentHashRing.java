@@ -16,7 +16,8 @@ public class ConsistentHashRing {
   //TODO increase this value
   private final int NUM_OF_VNODES = 1;
   private static final Logger LOG = LoggerFactory.getLogger(ConsistentHashRing.class);
-  private static final int PRINT_INTERVAL = 10;
+  // update interval is 200ms
+  private static final int PRINT_INTERVAL = 100;
   private int currentCount = 0;
   private final MessageDigest messageDigest_;
 
@@ -74,16 +75,16 @@ public class ConsistentHashRing {
 
   public synchronized String getServiceId(String objectKey) {
     Long objHash = hash(objectKey);
-    LOG.debug("Input objectName: {}, hashValue: {}", objectKey, objHash);
+    LOG.trace("Input objectName: {}, hashValue: {}", objectKey, objHash);
     if (ring.containsKey(objHash)) {
       String serviceId = ring.get(objHash);
-      LOG.debug("Returning serviceIdHash: {} serviceId : {}", objHash, serviceId);
+      LOG.trace("Returning serviceIdHash: {} serviceId : {}", objHash, serviceId);
       return serviceId;
     }
     SortedMap<Long, String> tailMap = ring.tailMap(objHash);
     Long nearestNodeId = !tailMap.isEmpty() ? tailMap.firstKey() : ring.firstKey();
     String serviceId = ring.get(nearestNodeId);
-    LOG.debug("Nearest serviceIdHash: {} serviceId : {}", nearestNodeId, serviceId);
+    LOG.trace("Nearest serviceIdHash: {} serviceId : {}", nearestNodeId, serviceId);
     return serviceId;
   }
 }
