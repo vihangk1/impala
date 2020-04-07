@@ -87,6 +87,35 @@ Status CatalogOpExecutor::Exec(const TCatalogOpRequest& request) {
               FLAGS_catalog_client_rpc_retry_interval_ms,
               [&attempt]() { return CatalogRpcDebugFn(&attempt); }, exec_response_.get());
       RETURN_IF_ERROR(rpc_status.status);
+
+      if (exec_response_.get()->__isset.catalog_address) {
+        // The catalog object did not belong to the catalog that we sent request to.
+        // Resend the request to the correct catalog.
+        //TODO: This is a clumsy way to split string.
+        std::string delimiter = ":";
+        std::string result = exec_response_.get()->catalog_address;
+        const std::string hostname = result.substr(0, result.find(delimiter));
+        int port = std::stoi(result.substr(result.find
+            (delimiter) + 1, std::string::npos));
+        const TNetworkAddress& new_address = MakeNetworkAddress(hostname, port);
+
+        VLOG_QUERY << "ANURAG: Found that the catalog object belongs to the "
+                      "catalog: " <<
+        hostname << ": " << port << ". Resending DDL request to this catalog.";
+
+        // Send a new request to the right catalog.
+        exec_response_.reset(new TDdlExecResponse());
+        rpc_status = CatalogServiceConnection::DoRpcWithRetry
+            (env_->catalogd_client_cache(), new_address,
+            &CatalogServiceClientWrapper::ExecDdl, request.ddl_params,
+            FLAGS_catalog_client_connection_num_retries,
+            FLAGS_catalog_client_rpc_retry_interval_ms,
+            [&attempt]() { return CatalogRpcDebugFn(&attempt); }, exec_response_.get());
+        RETURN_IF_ERROR(rpc_status.status);
+
+        // Expect it to be in the right catalog.
+        DCHECK(!exec_response_.get()->__isset.catalog_address);
+      }
       catalog_update_result_.reset(
           new TCatalogUpdateResult(exec_response_.get()->result));
       Status status(exec_response_->result.status);

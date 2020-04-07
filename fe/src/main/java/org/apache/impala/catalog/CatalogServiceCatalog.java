@@ -2986,6 +2986,13 @@ public class CatalogServiceCatalog extends Catalog {
   }
 
   /**
+   * Returns the catalog network address.
+   */
+  public String getCatalogServiceAddress() {
+    return catalogServiceAddress_;
+  }
+
+  /**
    * Returns the number of currently running partial RPCs.
    */
   @VisibleForTesting
