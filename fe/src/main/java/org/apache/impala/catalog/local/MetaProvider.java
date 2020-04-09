@@ -155,5 +155,7 @@ public interface MetaProvider {
     Partition getHmsPartition();
     byte[] getPartitionStats();
     boolean hasIncrementalStats();
+    boolean hasFds();
+    ImmutableList<FileDescriptor> getFds();
   }
 }

@@ -3,7 +3,7 @@
 <!--
 
 NOTE: THIS FILE IS AUTO-GENERATED FROM:
-  /home/vihang/work/src/upstream/cdp/impala/fe/src/test/resources/hive-site.xml.py
+  /home/vihang/work/src/upstream/cdp-impala/impala/fe/src/test/resources/hive-site.xml.py
 
 EDITS BY HAND WILL BE LOST!
 
@@ -31,7 +31,7 @@ EDITS BY HAND WILL BE LOST!
       </property>
       <property>
         <name>javax.jdo.option.ConnectionURL</name>
-        <value>jdbc:postgresql://localhost:5432/HMS_home_vihang_work_src_upstream_cdp_impala_cdp</value>
+        <value>jdbc:postgresql://localhost:5432/HMS_home_vihang_work_src_upstream_cdp_impala_impala_cdp</value>
       </property>
       <property>
         <name>javax.jdo.option.ConnectionUserName</name>

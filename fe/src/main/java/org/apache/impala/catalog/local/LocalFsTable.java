@@ -17,6 +17,10 @@
 
 package org.apache.impala.catalog.local;
 
+import static org.apache.impala.catalog.local.CatalogdMetaProvider.CATALOG_FETCH_PREFIX;
+
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -28,6 +32,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 
+import java.util.concurrent.TimeUnit;
 import org.apache.avro.Schema;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.local.LocalFs;
@@ -55,6 +60,7 @@ import org.apache.impala.catalog.local.MetaProvider.PartitionRef;
 import org.apache.impala.catalog.local.MetaProvider.TableMetaRef;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.FileSystemUtil;
+import org.apache.impala.service.FrontendProfile;
 import org.apache.impala.thrift.CatalogObjectsConstants;
 import org.apache.impala.thrift.THdfsPartition;
 import org.apache.impala.thrift.THdfsTable;
@@ -62,6 +68,7 @@ import org.apache.impala.thrift.TNetworkAddress;
 import org.apache.impala.thrift.TResultSet;
 import org.apache.impala.thrift.TTableDescriptor;
 import org.apache.impala.thrift.TTableType;
+import org.apache.impala.thrift.TUnit;
 import org.apache.impala.util.AvroSchemaConverter;
 import org.apache.impala.util.AvroSchemaUtils;
 import org.apache.impala.util.ListMap;
@@ -126,6 +133,10 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
    * of non-Avro tables.
    */
   private final String avroSchema_;
+
+  // query-level cache to avoid refetching partitions
+  Cache<Long, Object> queryCache_ =
+      CacheBuilder.newBuilder().recordStats().build();
 
   public static LocalFsTable load(LocalDb db, Table msTbl, TableMetaRef ref) {
     String fullName = msTbl.getDbName() + "." + msTbl.getTableName();
@@ -399,7 +410,7 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
   @Override
   public List<? extends FeFsPartition> loadPartitions(Collection<Long> ids,
       ThriftObjectType type) {
-      // TODO(todd) it seems like some queries actually call this multiple times.
+    // TODO(todd) it seems like some queries actually call this multiple times.
     // Perhaps we should store the result in this class, instead of relying on
     // catalog-layer caching?
     Preconditions.checkState(partitionSpecs_ != null,
@@ -410,12 +421,29 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
     if (ids.isEmpty()) return Collections.emptyList();
 
     List<PartitionRef> refs = new ArrayList<>();
+
+    List<FeFsPartition> ret = Lists.newArrayListWithCapacity(ids.size());
+    int queryCacheHits = 0;
     for (Long id : ids) {
-      LocalPartitionSpec spec = partitionSpecs_.get(id);
-      Preconditions.checkArgument(spec != null, "Invalid partition ID for table %s: %s",
-          getFullName(), id);
-      refs.add(Preconditions.checkNotNull(spec.getRef()));
+      FeFsPartition partition = (FeFsPartition) queryCache_.getIfPresent(id);
+      if (partition != null) {
+        queryCacheHits++;
+        ret.add(partition);
+      } else {
+        LocalPartitionSpec spec = partitionSpecs_.get(id);
+        Preconditions.checkArgument(spec != null, "Invalid partition ID for table %s: %s",
+            getFullName(), id);
+        refs.add(Preconditions.checkNotNull(spec.getRef()));
+      }
     }
+    if (refs.isEmpty()) {
+      LOG.info("VIHANG-DEBUG: All {} partitions were fetched from query cache for table "
+          + "{}", ids.size(), getTableName());
+      addToQueryCacheCounters(ids.size(), queryCacheHits);
+      return ret;
+    }
+    LOG.info("Fetching the remaining partitions from catalog. QueryCache hits {}/{}",
+        queryCacheHits, ids.size());
     Map<PartitionRef, PartitionMetadata> partsByRef;
     try {
       partsByRef = db_.getCatalog().getMetaProvider().loadPartitionsByRefs(
@@ -435,7 +463,6 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
             "Could not load partition file metadata " + getFullName(), e);
       }
     }
-    List<FeFsPartition> ret = Lists.newArrayListWithCapacity(ids.size());
     for (Long id : ids) {
       LocalPartitionSpec spec = partitionSpecs_.get(id);
       PartitionMetadata p = partsByRef.get(spec.getRef());
@@ -447,13 +474,31 @@ public class LocalFsTable extends LocalTable implements FeFsTable {
             ": missing expected partition with name '" + spec.getRef().getName() +
             "' (perhaps it was concurrently dropped by another process)");
       }
-      ImmutableList<FileDescriptor> fds = filemetadata.containsKey(spec.getRef()) ?
-          filemetadata.get(spec.getRef()) : ImmutableList.of();
-      LocalFsPartition part = new LocalFsPartition(this, spec, p.getHmsPartition(),
-          fds, p.getPartitionStats(), p.hasIncrementalStats());
+      LocalFsPartition part;
+      if (p.hasFds()) {
+        part = new LocalFsPartition(this, spec, p.getHmsPartition(),
+            p.getFds(), p.getPartitionStats(), p.hasIncrementalStats());
+      } else {
+        ImmutableList<FileDescriptor> fds = filemetadata.containsKey(spec.getRef()) ?
+            filemetadata.get(spec.getRef()) : ImmutableList.of();
+        part = new LocalFsPartition(this, spec, p.getHmsPartition(),
+            fds, p.getPartitionStats(), p.hasIncrementalStats());
+      }
+      queryCache_.put(id, part);
+      // add this partition as a query-cache miss
+      addToQueryCacheCounters(1, 0);
       ret.add(part);
     }
     return ret;
+  }
+
+  private void addToQueryCacheCounters(int total, int queryCacheHits) {
+    FrontendProfile profile = FrontendProfile.getCurrentOrNull();
+    if (profile == null) return;
+    final String prefix = CATALOG_FETCH_PREFIX + "." + "QueryCache" + ".";
+    profile.addToCounter(prefix + "Requests", TUnit.NONE, total);
+    profile.addToCounter(prefix + "Hits", TUnit.NONE, queryCacheHits);
+    profile.addToCounter(prefix + "Misses", TUnit.NONE, total - queryCacheHits);
   }
 
   @Override

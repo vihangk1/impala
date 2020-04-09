@@ -215,7 +215,7 @@ public class BackendConfig {
     return backendCfg_.skip_filemetadata_loading;
   }
 
-  public boolean fetchFileMetadataRemotely() {
+  public boolean getMetadataRemotely() {
     return backendCfg_.get_filemetadata_remotely;
   }
 

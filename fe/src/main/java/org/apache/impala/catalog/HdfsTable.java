@@ -636,7 +636,7 @@ public class HdfsTable extends Table implements FeFsTable {
       String validWriteIds, ListMap<TNetworkAddress> hostIndex,
       Map<String, String> tblProperties, String tblLocation) throws CatalogException {
     boolean skipFileMetadataLoad = BackendConfig.INSTANCE.skipFileMetadataLoading();
-    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.fetchFileMetadataRemotely();
+    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.getMetadataRemotely();
     // we should allow only one of the flags to be set
     Preconditions.checkState(skipFileMetadataLoad ^ getFileMetadataRemotely);
     if (skipFileMetadataLoad) {
@@ -670,7 +670,7 @@ public class HdfsTable extends Table implements FeFsTable {
     for (Map.Entry<Path, List<HdfsPartition>> e : partsByPath.entrySet()) {
       List<FileDescriptor> oldFds = e.getValue().get(0).getFileDescriptors();
       FileMetadataLoader loader = new FileMetadataLoader(e.getKey(),
-          Utils.shouldRecursivelyListPartitions(this), oldFds, hostIndex_, validTxnList,
+          Utils.shouldRecursivelyListPartitions(tblProperties), oldFds, hostIndex, validTxnList,
           writeIds, e.getValue().get(0).getFileFormat());
       // If there is a cached partition mapped to this path, we recompute the block
       // locations even if the underlying files have not changed.

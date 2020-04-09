@@ -215,7 +215,7 @@ public class CatalogdMetaProvider implements MetaProvider {
    */
   private static final Object DB_LIST_CACHE_KEY = new Object();
 
-  private static final String CATALOG_FETCH_PREFIX = "CatalogFetch";
+  public static final String CATALOG_FETCH_PREFIX = "CatalogFetch";
   private static final String DB_LIST_STATS_CATEGORY = "DatabaseList";
   private static final String DB_METADATA_STATS_CATEGORY = "Databases";
   private static final String TABLE_NAMES_STATS_CATEGORY = "TableNames";
@@ -844,9 +844,17 @@ public class CatalogdMetaProvider implements MetaProvider {
     Preconditions.checkArgument(table instanceof TableMetaRefImpl);
     TableMetaRefImpl refImpl = (TableMetaRefImpl)table;
     Stopwatch sw = Stopwatch.createStarted();
-    // Load what we can from the cache.
-    Map<PartitionRef, PartitionMetadata> refToMeta = loadPartitionsFromCache(refImpl,
-        hostIndex, partitionRefs);
+
+    boolean skipFileMetadata = BackendConfig.INSTANCE.skipFileMetadataLoading();
+    boolean getMetadataRemotely =
+        BackendConfig.INSTANCE.getMetadataRemotely();
+    Preconditions.checkState(skipFileMetadata ^ getMetadataRemotely);
+    Map<PartitionRef, PartitionMetadata> refToMeta = Maps.newHashMap();
+    if (!getMetadataRemotely) {
+      // Load what we can from the local cache.
+      refToMeta = loadPartitionsFromCache(refImpl,
+          hostIndex, partitionRefs);
+    }
 
     final int numHits = refToMeta.size();
     final int numMisses = partitionRefs.size() - numHits;
@@ -858,14 +866,18 @@ public class CatalogdMetaProvider implements MetaProvider {
     }
     if (!missingRefs.isEmpty()) {
       Map<PartitionRef, PartitionMetadata> fromCatalogd = loadPartitionsFromCatalogd(
-          refImpl, missingRefs);
+          refImpl, missingRefs, hostIndex);
       refToMeta.putAll(fromCatalogd);
       // Write back to the cache.
-      storePartitionsInCache(refImpl, fromCatalogd);
+      // if getFileMetadataRemotely is true we don't store the partitions in the
+      // MetaProvider cache
+      if (!getMetadataRemotely) {
+        storePartitionsInCache(refImpl, fromCatalogd);
+      }
     }
     sw.stop();
-    addStatsToProfile(PARTITIONS_STATS_CATEGORY, refToMeta.size(), numMisses, sw);
-    LOG.info("Request for partitions of {}: hit {}/{}", table, refToMeta.size(),
+    addStatsToProfile(PARTITIONS_STATS_CATEGORY, numHits, numMisses, sw);
+    LOG.info("Request for partitions of {}: Metaprovider Cache hit {}/{}", table, numHits,
         partitionRefs.size());
     return refToMeta;
   }
@@ -874,7 +886,7 @@ public class CatalogdMetaProvider implements MetaProvider {
   public Map<PartitionRef, ImmutableList<FileDescriptor>> loadPartitionFileMetadata(
       TableMetaRef table, Map<PartitionRef, PartitionMetadata> partMetasByRef,
       ListMap<TNetworkAddress> hostIndex) throws TException {
-    Stopwatch sw = new Stopwatch().start();
+    Stopwatch sw = Stopwatch.createStarted();
     Table hms_table = table.getHmsTable();
     String fullName =
         hms_table.getDbName() + "."
@@ -882,12 +894,15 @@ public class CatalogdMetaProvider implements MetaProvider {
     try {
       boolean skipFileMetadata = BackendConfig.INSTANCE.skipFileMetadataLoading();
       boolean getFileMetadateRemotely =
-          BackendConfig.INSTANCE.fetchFileMetadataRemotely();
+          BackendConfig.INSTANCE.getMetadataRemotely();
       Preconditions.checkState(skipFileMetadata ^ getFileMetadateRemotely);
       if (getFileMetadateRemotely) {
         // get the filemetadata from the catalog cache
-        return loadFdsFromCatalogd(table, Lists.newArrayList(partMetasByRef.keySet()),
-            hostIndex);
+        LOG.info("Get Filemetadata remotely is set, so it must be piggy-backed along "
+            + "with partitions");
+        return Maps.newHashMap();
+        //return loadFdsFromCatalogd(table, Lists.newArrayList(partMetasByRef.keySet()),
+        //    hostIndex);
       } else {
         // compute the file-metadata by directly looking at filesystem
         return computePartitionFileMetadata(partMetasByRef, hostIndex, hms_table,
@@ -1020,7 +1035,8 @@ public class CatalogdMetaProvider implements MetaProvider {
    * relative to the given 'hostIndex' before being returned.
    */
   private Map<PartitionRef, PartitionMetadata> loadPartitionsFromCatalogd(
-      TableMetaRefImpl table, List<PartitionRef> partRefs) throws TException,
+      TableMetaRefImpl table, List<PartitionRef> partRefs,
+      ListMap<TNetworkAddress> hostIndex) throws TException,
       LocalCatalogException {
     List<Long> ids = Lists.newArrayListWithCapacity(partRefs.size());
     for (PartitionRef partRef: partRefs) {
@@ -1033,14 +1049,20 @@ public class CatalogdMetaProvider implements MetaProvider {
     //TODO(vihang): The flags need to be better named and we possibly only need one flag
     // with multiple possible values such as "skip", "remote", "local"
     boolean skipFileMetadataLoad = BackendConfig.INSTANCE.skipFileMetadataLoading();
-    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.fetchFileMetadataRemotely();
-    if (skipFileMetadataLoad ^ getFileMetadataRemotely) {
+    boolean getFileMetadataRemotely = BackendConfig.INSTANCE.getMetadataRemotely();
+    // make sure only one of the flag is set
+    Preconditions.checkState(skipFileMetadataLoad ^ getFileMetadataRemotely);
+    if (skipFileMetadataLoad) {
       // if either of the flags are true, then we skip getting file metadata here
       // then later on, based on individual values of these flags we either compute
       // or load the filemetadata from catalogd
+      LOG.info("VIHANG-DEBUG: Requesting {} partitions from catalog without filemetadata"
+          + " for table {}.{}",ids.size(), table.dbName_, table.tableName_);
       req.table_info_selector.want_partition_files = false;
       req.table_info_selector.want_hms_table = true;
     } else {
+      LOG.info("VIHANG-DEBUG: Requesting {} partitions from catalog including "
+          + "filemetadata for table {}.{}",ids.size(), table.dbName_, table.tableName_);
       req.table_info_selector.want_partition_files = true;
     }
     // TODO(todd): fetch incremental stats on-demand for compute-incremental-stats.
@@ -1065,6 +1087,20 @@ public class CatalogdMetaProvider implements MetaProvider {
       PartitionMetadataImpl metaImpl = new PartitionMetadataImpl(msPart,
             part.getPartition_stats(), part.has_incremental_stats);
       checkResponse(partRef != null, req, "returned unexpected partition id %s", part.id);
+      if (part.file_descriptors != null) {
+        List<FileDescriptor> fds = Lists.newArrayListWithCapacity(
+            part.file_descriptors.size());
+        for (THdfsFileDesc thriftFd : part.file_descriptors) {
+          FileDescriptor fd = FileDescriptor.fromThrift(thriftFd);
+          // The file descriptors returned via the RPC use host indexes that reference
+          // the 'network_addresses' list in the RPC. However, the caller may have already
+          // loaded some addresses into 'hostIndex'. So, the returned FDs need to be
+          // remapped to point to the caller's 'hostIndex' instead of the list in the
+          // RPC response.
+          fds.add(fd.cloneWithNewHostIndex(resp.table_info.network_addresses, hostIndex));
+        }
+        metaImpl.setFds(ImmutableList.copyOf(fds));
+      }
 
       PartitionMetadata oldVal = ret.put(partRef, metaImpl);
       if (oldVal != null) {
@@ -1498,6 +1534,7 @@ public class CatalogdMetaProvider implements MetaProvider {
 
   public static class PartitionMetadataImpl implements PartitionMetadata {
     private final Partition msPartition_;
+    private ImmutableList<FileDescriptor> fds_;
     private final byte[] partitionStats_;
     private final boolean hasIncrementalStats_;
 
@@ -1518,6 +1555,20 @@ public class CatalogdMetaProvider implements MetaProvider {
 
     @Override
     public boolean hasIncrementalStats() { return hasIncrementalStats_; }
+
+    @Override
+    public boolean hasFds() {
+      return fds_ != null;
+    }
+
+    @Override
+    public ImmutableList<FileDescriptor> getFds() {
+      return fds_;
+    }
+
+    public void setFds(ImmutableList<FileDescriptor> fd) {
+      fds_ = fd;
+    }
   }
 
   /**

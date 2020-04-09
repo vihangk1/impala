@@ -378,6 +378,16 @@ class DirectMetaProvider implements MetaProvider {
     }
 
     @Override
+    public boolean hasFds() {
+      return false;
+    }
+
+    @Override
+    public ImmutableList<FileDescriptor> getFds() {
+      return null;
+    }
+
+    @Override
     public byte[] getPartitionStats() {
       throw new UnsupportedOperationException("Incremental stats not supported with " +
           "DirectMetaProvider implementation.");
