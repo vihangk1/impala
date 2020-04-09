@@ -892,22 +892,12 @@ public class CatalogdMetaProvider implements MetaProvider {
         hms_table.getDbName() + "."
             + hms_table.getTableName();
     try {
-      boolean skipFileMetadata = BackendConfig.INSTANCE.skipFileMetadataLoading();
-      boolean getFileMetadateRemotely =
-          BackendConfig.INSTANCE.getMetadataRemotely();
-      Preconditions.checkState(skipFileMetadata ^ getFileMetadateRemotely);
-      if (getFileMetadateRemotely) {
-        // get the filemetadata from the catalog cache
-        LOG.info("Get Filemetadata remotely is set, so it must be piggy-backed along "
-            + "with partitions");
-        return Maps.newHashMap();
-        //return loadFdsFromCatalogd(table, Lists.newArrayList(partMetasByRef.keySet()),
-        //    hostIndex);
-      } else {
-        // compute the file-metadata by directly looking at filesystem
-        return computePartitionFileMetadata(partMetasByRef, hostIndex, hms_table,
-            fullName);
-      }
+      // compute the file-metadata by directly looking at filesystem
+      LOG.info("VIHANG-DEBUG: Computing file metadata for {} partitions of table {}.{}",
+          partMetasByRef.size(), table.getHmsTable().getDbName(),
+          table.getHmsTable().getTableName());
+      return computePartitionFileMetadata(partMetasByRef, hostIndex, hms_table,
+          fullName);
     } finally {
       long timeTaken = sw.stop().elapsed(TimeUnit.NANOSECONDS);
       addTableFileMetadataLoadTimeToProfile(timeTaken);
@@ -1056,14 +1046,12 @@ public class CatalogdMetaProvider implements MetaProvider {
       // if either of the flags are true, then we skip getting file metadata here
       // then later on, based on individual values of these flags we either compute
       // or load the filemetadata from catalogd
-      LOG.info("VIHANG-DEBUG: Requesting {} partitions from catalog without filemetadata"
-          + " for table {}.{}",ids.size(), table.dbName_, table.tableName_);
       req.table_info_selector.want_partition_files = false;
       req.table_info_selector.want_hms_table = true;
     } else {
-      LOG.info("VIHANG-DEBUG: Requesting {} partitions from catalog including "
+      LOG.info("VIHANG-DEBUG: Requesting {} partitions from catalog excluding "
           + "filemetadata for table {}.{}",ids.size(), table.dbName_, table.tableName_);
-      req.table_info_selector.want_partition_files = true;
+      req.table_info_selector.want_partition_files = false;
     }
     // TODO(todd): fetch incremental stats on-demand for compute-incremental-stats.
     req.table_info_selector.want_partition_stats = true;
