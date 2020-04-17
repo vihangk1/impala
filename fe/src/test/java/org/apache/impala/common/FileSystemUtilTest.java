@@ -33,6 +33,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import com.google.common.collect.ImmutableList;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.util.List;
+import java.util.Random;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -58,10 +67,13 @@ public class FileSystemUtilTest {
         + "/catalog_leader");
     LeaderElector leaderElector2 = new LeaderElector(2, 30, 1000, "hdfs:///tmp"
         + "/catalog_leader");
-    ExecutorService service = Executors.newFixedThreadPool(2);
+    LeaderMonitor monitor = new LeaderMonitor(10, leaderElector1, leaderElector2);
+    ExecutorService service = Executors.newFixedThreadPool(3);
     Future<Void> task1 = service.submit(leaderElector1);
     Future<Void> task2 = service.submit(leaderElector2);
+    Future<Void> monitorTask = service.submit(monitor);
     service.shutdown();
+    //monitorTask.get();
     task1.get();
     task2.get();
   }
@@ -78,32 +90,52 @@ public class FileSystemUtilTest {
     final long leaseDuration;
     final long updateFrequency;
     long pingsSinceLastChange;
-    final Path leaderFile;
+    final Path leaderDirectory;
     final int id;
     private long lastCheckedModificationTime = -1;
+    private int lastLeaderFileId = 0;
     private static final Configuration CONF = new Configuration();
     private final FileSystem fs;
     private final AtomicBoolean isLeader = new AtomicBoolean(false);
     private long leaderFailureInterval;
     private static Random rand = new Random(System.currentTimeMillis());
 
-    LeaderElector(int id, long leaseDuration, long updateFrequency, String leaderFile)
+    private final String leaderFileNameFormat = "catalog_leader_file_%d";
+
+    LeaderElector(int id, long leaseDuration, long updateFrequency, String leaderDir)
         throws IOException {
       this.id = id;
       this.leaseDuration = leaseDuration;
       this.updateFrequency = updateFrequency;
-      this.leaderFile = new Path(leaderFile);
-      fs = this.leaderFile.getFileSystem(CONF);
+      this.leaderDirectory = new Path(leaderDir);
+      fs = this.leaderDirectory.getFileSystem(CONF);
       // random fault injections for leaders
       leaderFailureInterval = rand.nextInt(60) + 1;
     }
 
-    private long getModificationTime() throws LeaderElectorException {
+    private Pair<Long, Integer> getLatestLeaderFile() throws LeaderElectorException {
       try {
-        FileStatus status = fs.getFileStatus(leaderFile);
-        return status.getModificationTime();
+        if (!fs.exists(leaderDirectory)) {
+          fs.mkdirs(leaderDirectory);
+        }
+        FileStatus[] statuses = fs.listStatus(leaderDirectory);
+        int count = 0;
+        long modificationTime = -1;
+        for (FileStatus status : statuses) {
+          if (status.isFile()) {
+            String p = status.getPath().toString();
+            String filename = p.substring(p.lastIndexOf('/') + 1);
+            int fileCount =
+                Integer.parseInt(filename.substring(filename.lastIndexOf('_') + 1));
+            if (fileCount > count) {
+              count = fileCount;
+              modificationTime = status.getModificationTime();
+            }
+          }
+        }
+        return new Pair<>(modificationTime, count);
       } catch (FileNotFoundException ex) {
-        return -1;
+        return new Pair(-1, 0);
       } catch (IOException ex) {
         ex.printStackTrace();
         throw new LeaderElectorException("Could not get modification time for leader "
@@ -111,7 +143,7 @@ public class FileSystemUtilTest {
       }
     }
 
-    private boolean createLeaderFile() throws LeaderElectorException {
+    private boolean updateLeaderFile(int fileid) throws LeaderElectorException {
       Path tmpFileName = new Path("hdfs:///tmp/__tmp__" + id);
       try (FSDataOutputStream out = fs
           .create(tmpFileName, true)) {
@@ -121,14 +153,13 @@ public class FileSystemUtilTest {
             ex);
       }
       try {
-        if (fs.exists(leaderFile)) {
-          // this thread is already the leader, we should force update the modification
-          // file
-          fs.delete(leaderFile, false);
-        }
         // this must be atomic rename. If the leader file already exists, return false
-        //TODO can we replace this by createFile?
-        boolean ret = fs.rename(tmpFileName, leaderFile);
+        // we try to rename this file to the next id. If there is already a nextId then
+        // lease was renewed by some other catalog process
+        // TODO can we replace this by createFile? Implement a reaper thread which
+        //  cleans up old leader files which say the first 5
+        boolean ret = fs.rename(tmpFileName, new Path(leaderDirectory,
+            String.format(leaderFileNameFormat, fileid)));
         if (ret) {
           System.out.println(System.currentTimeMillis() + " Thread " + id + " "
               + (isLeader.get() ? "Updated " : "Created") + " leader file");
@@ -147,20 +178,24 @@ public class FileSystemUtilTest {
     }
 
     private void reset() {
-      isLeader.set(false);
-      lastCheckedModificationTime = -1;
-      pingsSinceLastChange = 0;
+      synchronized (isLeader) {
+        isLeader.set(false);
+        lastCheckedModificationTime = -1;
+        pingsSinceLastChange = 0;
+      }
     }
 
     private boolean isDead = false;
+
     // returns true if the leader is dead, otherwise false
     // returns false if this is not the leader
-    private boolean injectFailure() {
-      if (!isLeader.get()) return false;
+    private boolean injectLeaderFailure() {
+      if (!isLeader.get())
+        return false;
       if (leaderFailureInterval == 0) {
         isDead = !isDead;
         // failureInterval is complete, toggle the dead switch and return
-        System.out.println("Injecting " + (isDead? " failure " : " recovery ") + "for "
+        System.out.println("Injecting " + (isDead ? " failure " : " recovery ") + "for "
             + "thread " + id);
         leaderFailureInterval = rand.nextInt(60) + 1;
         if (!isDead) {
@@ -177,24 +212,35 @@ public class FileSystemUtilTest {
     public Void call() {
       while (true) {
         try {
-          if (!injectFailure()) {
-            long currentModificationTime = getModificationTime();
-            boolean fileUpdated = currentModificationTime != lastCheckedModificationTime;
+          if (!injectLeaderFailure()) {
+            Pair<Long, Integer> leaderFileStatus = getLatestLeaderFile();
+            boolean fileUpdated =
+                (leaderFileStatus.second != lastLeaderFileId)
+                    || (leaderFileStatus.first != lastCheckedModificationTime);
             if (fileUpdated) {
               // file has been updated leader is alive, renew leaseExpiryCounter
-              pingsSinceLastChange = isLeader.get() ? leaseDuration/2 : 0;
-              lastCheckedModificationTime = currentModificationTime;
+              pingsSinceLastChange = isLeader.get() ? leaseDuration / 2 : 0;
+              lastCheckedModificationTime = leaderFileStatus.first;
+              lastLeaderFileId = leaderFileStatus.second;
             } else {
               pingsSinceLastChange++;
             }
             System.out.println(System.currentTimeMillis() + " Thread " + id + " woke up. "
                 + "Leader=" + isLeader.get() + " currentModificationTime="
-                + currentModificationTime + " timeout=" + (leaseDuration - pingsSinceLastChange));
-            if (currentModificationTime == -1
-                || leaseExpired()) {
+                + leaderFileStatus.first + " timeout=" + (leaseDuration
+                - pingsSinceLastChange));
+            if (leaderFileStatus.first == -1
+                || (leaseExpired() && !fileUpdated)) {
               // either leader file is not found, or lease is expired
               // attempt to create a leader file
-              isLeader.set(createLeaderFile());
+              int nextFileId = leaderFileStatus.second + 1;
+              boolean success = updateLeaderFile(nextFileId);
+              if (success) {
+                lastLeaderFileId = nextFileId;
+                isLeader.set(true);
+              } else {
+                isLeader.set(false);
+              }
             }
           }
           Thread.sleep(updateFrequency);
@@ -204,28 +250,6 @@ public class FileSystemUtilTest {
           throw new RuntimeException(ex);
         }
       }
-    }
-  }
-
-  private void createFileAtomically(String targetPath, long leaseRenewalDuration) {
-    Path target = new Path(targetPath);
-    FileSystem fs = null;
-    try {
-      fs = target.getFileSystem(new Configuration());
-    } catch (IOException e) {
-      e.printStackTrace();
-      Assert.fail();
-    }
-    assert (fs instanceof DistributedFileSystem);
-    try {
-      FileStatus status = fs.getFileStatus(target);
-      Assert.assertNotNull(status);
-      long modificationTime = status.getModificationTime();
-    } catch (FileNotFoundException e) {
-
-    } catch (IOException ex) {
-      ex.printStackTrace();
-      fail();
     }
   }
 
@@ -287,5 +311,34 @@ public class FileSystemUtilTest {
     Mockito.when(mockFileStatus.getPath()).thenReturn(input);
     Mockito.when(mockFileStatus.isDirectory()).thenReturn(isDir);
     return FileSystemUtil.isInIgnoredDirectory(TEST_TABLE_PATH, mockFileStatus);
+  }
+
+  private static class LeaderMonitor implements Callable<Void> {
+    final long frequency;
+    final List<LeaderElector> electors;
+    LeaderMonitor(long frequency, LeaderElector... electors) {
+      this.frequency = frequency;
+      this.electors = ImmutableList.copyOf(electors);
+    }
+
+    @Override
+    public Void call() throws Exception {
+      while(true) {
+        boolean leaderFound = false;
+        int leaderId = -1;
+        for (LeaderElector elector : electors) {
+          boolean isLeader = elector.isLeader.get();
+          if (isLeader) {
+            if (leaderFound) {
+              System.out.println(String.format("ERROR: Multiple leaders found %d and %d",
+                  elector.id, leaderId));
+            }
+            leaderId = elector.id;
+            leaderFound = true;
+          }
+        }
+        Thread.sleep(frequency);
+      }
+    }
   }
 }
