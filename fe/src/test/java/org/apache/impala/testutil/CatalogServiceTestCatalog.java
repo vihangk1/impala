@@ -23,6 +23,7 @@ import org.apache.impala.authorization.AuthorizationPolicy;
 import org.apache.impala.authorization.NoopAuthorizationFactory.NoopAuthorizationManager;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.MetaStoreClientPool;
+import org.apache.impala.catalog.metastore.CatalogMetastoreServer;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.service.FeSupport;
@@ -54,19 +55,29 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
     return createWithAuth(new NoopAuthorizationFactory());
   }
 
+  public static CatalogServiceCatalog createWithAuth(AuthorizationFactory authzFactory) {
+    return createWithAuth(authzFactory, false);
+  }
+
   /**
    * Creates a catalog server that reads authorization policy metadata from the
    * authorization config.
    */
-  public static CatalogServiceCatalog createWithAuth(AuthorizationFactory authzFactory) {
+  public static CatalogServiceCatalog createWithAuth(AuthorizationFactory authzFactory,
+      boolean startCatalogHms) {
     FeSupport.loadLibrary();
     CatalogServiceCatalog cs;
     try {
       if (MetastoreShim.getMajorVersion() > 2) {
         MetastoreShim.setHiveClientCapabilities();
       }
-      cs = new CatalogServiceTestCatalog(false, 16, new TUniqueId(),
-          new MetaStoreClientPool(0, 0));
+      if (startCatalogHms) {
+        cs = new CatalogServiceTestHMSCatalog(false, 16, new TUniqueId(),
+            new MetaStoreClientPool(0, 0));
+      } else {
+        cs = new CatalogServiceTestCatalog(false, 16, new TUniqueId(),
+            new MetaStoreClientPool(0, 0));
+      }
       cs.setAuthzManager(authzFactory.newAuthorizationManager(cs));
       cs.reset();
     } catch (ImpalaException e) {
@@ -93,6 +104,24 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
     cs.setAuthzManager(new NoopAuthorizationManager());
     cs.reset();
     return cs;
+  }
+
+  private static class CatalogServiceTestHMSCatalog extends CatalogServiceTestCatalog {
+
+    public CatalogServiceTestHMSCatalog(boolean loadInBackground, int numLoadingThreads,
+        TUniqueId catalogServiceId,
+        MetaStoreClientPool metaStoreClientPool) throws ImpalaException {
+      super(loadInBackground, numLoadingThreads, catalogServiceId, metaStoreClientPool);
+    }
+    @Override
+    protected CatalogMetastoreServer getCatalogMetastoreServer() {
+      return new CatalogMetastoreServer(this);
+    }
+  }
+
+  public static CatalogServiceCatalog createTestCatalogMetastoreServer()
+      throws ImpalaException {
+    return createWithAuth(new NoopAuthorizationFactory(), true);
   }
 
   @Override

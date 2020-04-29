@@ -193,4 +193,12 @@ struct TBackendGflags {
   84: required string scratch_dirs
 
   85: required bool enable_row_filtering
+
+  86: required bool start_hms_server
+
+  87: required i32 hms_port
+
+  88: required bool fallback_to_hms_on_errors
+
+  89: required bool enable_catalogd_hms_cache
 }
