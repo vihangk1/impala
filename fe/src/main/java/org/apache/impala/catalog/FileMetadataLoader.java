@@ -152,7 +152,7 @@ public class FileMetadataLoader {
    */
   public void load() throws MetaException, IOException {
     Preconditions.checkState(loadStats_ == null, "already loaded");
-    loadStats_ = new LoadStats();
+    loadStats_ = new LoadStats(partDir_);
     FileSystem fs = partDir_.getFileSystem(CONF);
 
     // If we don't have any prior FDs from which we could re-use old block location info,
@@ -193,7 +193,7 @@ public class FileMetadataLoader {
 
       if (writeIds_ != null) {
         stats = AcidUtils.filterFilesForAcidState(stats, partDir_, validTxnList_,
-            writeIds_, loadStats_);
+          writeIds_, loadStats_);
       }
 
       if (fileFormat_ == HdfsFileFormat.HUDI_PARQUET) {
@@ -259,7 +259,11 @@ public class FileMetadataLoader {
   }
 
   // File/Block metadata loading stats for a single HDFS path.
-  public class LoadStats {
+  public static class LoadStats {
+    private final Path partDir_;
+    LoadStats(Path partDir) {
+      this.partDir_ = Preconditions.checkNotNull(partDir);
+    }
     /** Number of files skipped because they pertain to an uncommitted ACID transaction */
     public int uncommittedAcidFilesSkipped = 0;
 

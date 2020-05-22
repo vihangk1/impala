@@ -329,6 +329,15 @@ struct TTableInfoSelector {
   // The response should contain table constraints like primary keys
   // and foreign keys
   8: bool want_table_constraints
+
+  // If this is for a ACID table and this is set, this table info returned
+  // will be consistent the provided valid_write_ids
+  9: optional CatalogObjects.TValidWriteIdList valid_write_ids
+
+  // If a valid_txn_ids is provided it is used to compute the snapshot
+  // of the returned metadata. If not, the current valid txns are computed
+  // by the catalog
+  10: optional string valid_txn_ids
 }
 
 // Returned information about a particular partition.
@@ -488,6 +497,9 @@ struct TGetCatalogObjectResponse {
 struct TGetPartitionStatsRequest {
   1: required CatalogServiceVersion protocol_version = CatalogServiceVersion.V1
   2: required CatalogObjects.TTableName table_name
+  // if the table is transactional then this field represents the client's view
+  // of the table snapshot view in terms of ValidWriteIdList.
+  3: optional CatalogObjects.TValidWriteIdList valid_write_id_list
 }
 
 // Response for requesting partition statistics. All partition statistics

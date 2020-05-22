@@ -20,19 +20,30 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.errorprone.annotations.Immutable;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.metastore.api.MetaException;
+import org.apache.hadoop.hive.metastore.txn.TxnUtils;
+import org.apache.hive.common.util.TxnIdUtils;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.FileMetadataLoader.LoadStats;
+import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
+import org.apache.impala.catalog.HdfsTable;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.ScalarType;
 import org.apache.impala.catalog.StructField;
 import org.apache.impala.catalog.StructType;
+import org.apache.impala.catalog.Table;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.Pair;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.thrift.TTransactionalType;
+import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -285,6 +296,32 @@ public class AcidUtils {
     }
   }
 
+  public static List<FileDescriptor> filterFDsforAcidState(List<FileDescriptor> fds,
+      ValidTxnList validTxnList, ValidWriteIdList writeIds, LoadStats stats) throws MetaException,
+    TException {
+    Map<String, FileDescriptor> fdsByRelPath = new HashMap<>();
+    for (FileDescriptor fd : fds) {
+      fdsByRelPath.put(fd.getRelativePath(), fd);
+    }
+    filterFilesForAcidState(fdsByRelPath.keySet(), validTxnList, writeIds, stats);
+    return fdsByRelPath.values().stream().collect(Collectors.toList());
+  }
+
+  public static List<FileStatus> filterFilesForAcidState(List<FileStatus> stats,
+      Path baseDir, ValidTxnList validTxnList, ValidWriteIdList writeIds,
+      @Nullable LoadStats loadStats)  throws MetaException {
+    Map<String, FileStatus> statByRelPaths = new HashMap<>();
+    for (FileStatus f : stats) {
+      //TODO(Vihang) We are filtering out directories before-hand. Is it possible there
+      //could be empty ACID directory?
+      if (!f.isDirectory()) {
+        statByRelPaths.put(FileSystemUtil.relativizePath(f.getPath(), baseDir), f);
+      }
+    }
+    filterFilesForAcidState(statByRelPaths.keySet(), validTxnList, writeIds, loadStats);
+    return statByRelPaths.values().stream().collect(Collectors.toList());
+  }
+
   /**
    * Filters the files based on Acid state.
    * @param stats the FileStatuses obtained from recursively listing the directory
@@ -297,18 +334,17 @@ public class AcidUtils {
    * @throws MetaException on ACID error. TODO: Remove throws clause once IMPALA-9042
    * is resolved.
    */
-  public static List<FileStatus> filterFilesForAcidState(List<FileStatus> stats,
-      Path baseDir, ValidTxnList validTxnList, ValidWriteIdList writeIds,
-      @Nullable LoadStats loadStats) throws MetaException {
+  public static List<String> filterFilesForAcidState(Collection<String> relPaths,
+      ValidTxnList validTxnList, ValidWriteIdList writeIds,
+      @Nullable LoadStats loadStats)  throws MetaException {
     // First filter out any paths that are not considered valid write IDs.
     // At the same time, calculate the max valid base write ID and collect the names of
     // the delta directories.
     Predicate<String> pred = new WriteListBasedPredicate(validTxnList, writeIds);
     long maxBaseWriteId = Long.MIN_VALUE;
     Set<String> deltaDirNames = new HashSet<>();
-    for (Iterator<FileStatus> it = stats.iterator(); it.hasNext();) {
-      FileStatus stat = it.next();
-      String relPath = FileSystemUtil.relativizePath(stat.getPath(), baseDir);
+    for (Iterator<String> it = relPaths.iterator(); it.hasNext();) {
+      String relPath = it.next();
       if (!pred.test(relPath)) {
         it.remove();
         if (loadStats != null) loadStats.uncommittedAcidFilesSkipped++;
@@ -329,23 +365,16 @@ public class AcidUtils {
         getFilteredDeltaDirs(deltas, maxBaseWriteId, writeIds);
     // Filter out any files that are superceded by the latest valid base or not located
     // in 'filteredDeltaDirs'.
-    return filterFilesForAcidState(stats, baseDir, maxBaseWriteId, filteredDeltaDirs,
+    return filterFilesForAcidState(relPaths, maxBaseWriteId, filteredDeltaDirs,
         loadStats);
   }
 
-  private static List<FileStatus> filterFilesForAcidState(List<FileStatus> stats,
-      Path baseDir, long maxBaseWriteId, Set<String> deltaDirs,
+  private static List<String> filterFilesForAcidState(Collection<String> relPaths,
+      long maxBaseWriteId, Set<String> deltaDirs,
       @Nullable LoadStats loadStats) {
-    List<FileStatus> validStats = new ArrayList<>(stats);
-    for (Iterator<FileStatus> it = validStats.iterator(); it.hasNext();) {
-      FileStatus stat = it.next();
-
-      if (stat.isDirectory()) {
-        it.remove();
-        continue;
-      }
-
-      String relPath = FileSystemUtil.relativizePath(stat.getPath(), baseDir);
+    List<String> validFiles = new ArrayList<>(relPaths);
+    for (Iterator<String> it = validFiles.iterator(); it.hasNext();) {
+      String relPath = it.next();
       if (relPath.startsWith("delta_") ||
           relPath.startsWith("delete_delta_")) {
         String dirName = getFirstDirName(relPath);
@@ -373,7 +402,7 @@ public class AcidUtils {
       // waits to be deleted.
       if (maxBaseWriteId != SENTINEL_BASE_WRITE_ID) it.remove();
     }
-    return validStats;
+    return validFiles;
   }
 
   private static List<Pair<String, ParsedDelta>> getValidDeltaDirsOrdered(
@@ -511,5 +540,86 @@ public class AcidUtils {
       }
     }
     return filteredDeltaDirs;
+  }
+
+  /**
+   * This method compares the writeIdList of the given table if it is loaded and is a
+   * transactional table with the given ValidWriteIdList. If the tbl metadata is a
+   * superset of the metadata view represented by the given validWriteIdList this
+   * method returns a value greater than 0. If they are an exact match of each other,
+   * it returns 0 and if the table ValidWriteIdList is behind the provided
+   * validWriteIdList this return -1. This information useful to determine if the
+   * cached table can be used to construct a consistent snapshot corresponding to the
+   * given validWriteIdList.
+   */
+  public static int compare(HdfsTable tbl, ValidWriteIdList validWriteIdList) {
+    Preconditions.checkState(tbl != null && tbl.getMetaStoreTable() != null);
+    // if tbl is not a transactional, there is not to compare against and we return 0
+    if (!isTransactionalTable(tbl.getMetaStoreTable().getParameters())) return 0;
+    Preconditions.checkNotNull(tbl.getValidWriteIds());
+    return compare(tbl.getValidWriteIds(), validWriteIdList);
+  }
+
+  /*** This method is mostly copied from {@link org.apache.hive.common.util.TxnIdUtils}
+   * (e649562) with the exception that the table names for both the input writeIdList
+   * must be same to have a valid comparison.
+   * //TODO source this directly from hive-exec so that future changes to this are
+   * automatically imported.
+   *
+   * @param a
+   * @param b
+   * @return 0, if a and b are equivalent
+   * 1, if a is more recent
+   * -1, if b is more recent
+   ***/
+  private static int compare(ValidWriteIdList a, ValidWriteIdList b) {
+    Preconditions.checkState(a.getTableName().equalsIgnoreCase(b.getTableName()));
+    // The algorithm assumes invalidWriteIds are sorted and values are less or equal than
+    // hwm, here is how the algorithm works:
+    // 1. Compare two invalidWriteIds until one the list ends, difference means the
+    // mismatch writeid is committed in one ValidWriteIdList but not the other, the
+    // comparison end
+    // 2. Every writeid from the last writeid in the short invalidWriteIds till its
+    // hwm should be committed in the other ValidWriteIdList, otherwise the comparison
+    // end
+    // 3. Every writeid from lower hwm to higher hwm should be invalid, otherwise, the
+    // comparison end
+    int minLen = Math.min(a.getInvalidWriteIds().length, b.getInvalidWriteIds().length);
+    for (int i = 0; i < minLen; i++) {
+      if (a.getInvalidWriteIds()[i] == b.getInvalidWriteIds()[i]) {
+        continue;
+      }
+      return a.getInvalidWriteIds()[i] > b.getInvalidWriteIds()[i] ? 1 : -1;
+    }
+    if (a.getInvalidWriteIds().length == b.getInvalidWriteIds().length) {
+      return Long.signum(a.getHighWatermark() - b.getHighWatermark());
+    }
+    if (a.getInvalidWriteIds().length == minLen) {
+      if (a.getHighWatermark() != b.getInvalidWriteIds()[minLen] - 1) {
+        return Long.signum(a.getHighWatermark() - (b.getInvalidWriteIds()[minLen] - 1));
+      }
+      if (allInvalidFrom(b.getInvalidWriteIds(), minLen, b.getHighWatermark())) {
+        return 0;
+      } else {
+        return -1;
+      }
+    } else {
+      if (b.getHighWatermark() != a.getInvalidWriteIds()[minLen] - 1) {
+        return Long.signum(b.getHighWatermark() - (a.getInvalidWriteIds()[minLen] - 1));
+      }
+      if (allInvalidFrom(a.getInvalidWriteIds(), minLen, a.getHighWatermark())) {
+        return 0;
+      } else {
+        return 1;
+      }
+    }
+  }
+  private static boolean allInvalidFrom(long[] invalidIds, int start, long hwm) {
+    for (int i=start+1;i<invalidIds.length;i++) {
+      if (invalidIds[i] != (invalidIds[i-1]+1)) {
+        return false;
+      }
+    }
+    return invalidIds[invalidIds.length-1] == hwm;
   }
 }

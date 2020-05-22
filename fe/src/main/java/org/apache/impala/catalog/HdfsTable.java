@@ -39,6 +39,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hive.common.ValidReadTxnList;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -54,6 +55,7 @@ import org.apache.impala.analysis.LiteralExpr;
 import org.apache.impala.analysis.NullLiteral;
 import org.apache.impala.analysis.NumericLiteral;
 import org.apache.impala.analysis.PartitionKeyValue;
+import org.apache.impala.catalog.FileMetadataLoader.LoadStats;
 import org.apache.impala.catalog.HdfsPartition.FileBlock;
 import org.apache.impala.catalog.HdfsPartition.FileDescriptor;
 import org.apache.impala.common.FileSystemUtil;
@@ -80,6 +82,7 @@ import org.apache.impala.thrift.TSqlConstraints;
 import org.apache.impala.thrift.TTable;
 import org.apache.impala.thrift.TTableDescriptor;
 import org.apache.impala.thrift.TTableType;
+import org.apache.impala.thrift.TValidWriteIdList;
 import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.AvroSchemaConverter;
 import org.apache.impala.util.AvroSchemaUtils;
@@ -1554,6 +1557,25 @@ public class HdfsTable extends Table implements FeFsTable {
         if (req.table_info_selector.want_partition_files) {
           List<FileDescriptor> fds = part.getFileDescriptors();
           partInfo.file_descriptors = Lists.newArrayListWithCapacity(fds.size());
+          TValidWriteIdList validWriteIdList = null;
+          ValidTxnList validTxnList = null;
+          if (req.table_info_selector.valid_write_ids != null) {
+            validWriteIdList = req.table_info_selector.valid_write_ids;
+            Preconditions.checkNotNull(req.table_info_selector.valid_txn_ids);
+            validTxnList = new ValidReadTxnList();
+            validTxnList.readFromString(req.table_info_selector.valid_txn_ids);
+          }
+          if (validWriteIdList != null) {
+            try {
+              AcidUtils.filterFDsforAcidState(fds, validTxnList,
+                MetastoreShim.getValidWriteIdListFromThrift(getFullName(),
+                  validWriteIdList), new LoadStats(new Path(getHdfsBaseDir())));
+            } catch (TException e) {
+              throw new TableLoadingException("Could not filter the metadata for the "
+                + "given ValidWriteList " + validWriteIdList.toString() + " and "
+                + "ValidtxnIdList " + validTxnList.toString());
+            }
+          }
           for (FileDescriptor fd: fds) {
             partInfo.file_descriptors.add(fd.toThrift());
           }
