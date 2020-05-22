@@ -17,6 +17,8 @@
 
 package org.apache.impala.catalog;
 
+import static org.apache.impala.thrift.TCatalogObjectType.TABLE;
+
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
@@ -38,6 +40,7 @@ import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.protocol.CachePoolEntry;
 import org.apache.hadoop.hdfs.protocol.CachePoolInfo;
+import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -59,6 +62,7 @@ import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
 import org.apache.impala.common.RuntimeEnv;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.service.BackendConfig;
 import org.apache.impala.service.FeSupport;
 import org.apache.impala.thrift.CatalogLookupStatus;
@@ -88,6 +92,8 @@ import org.apache.impala.thrift.TTableUsage;
 import org.apache.impala.thrift.TTableUsageMetrics;
 import org.apache.impala.thrift.TUniqueId;
 import org.apache.impala.thrift.TUpdateTableUsageRequest;
+import org.apache.impala.thrift.TValidWriteIdList;
+import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.CatalogBlacklistUtils;
 import org.apache.impala.util.FunctionUtils;
 import org.apache.impala.util.PatternMatcher;
@@ -568,8 +574,14 @@ public class CatalogServiceCatalog extends Catalog {
     TTableName tableName = request.table_name;
     LOG.info("Fetching partition statistics for: " + tableName.getDb_name() + "."
         + tableName.getTable_name());
+    ValidWriteIdList writeIdList = null;
+    if (request.valid_write_ids != null) {
+      writeIdList = MetastoreShim.getValidWriteIdListFromThrift(
+        new TableName(request.table_name.db_name, request.table_name.table_name)
+          .toString(), request.valid_write_ids);
+    }
     Table table = getOrLoadTable(tableName.db_name, tableName.table_name,
-        "needed to fetch partition stats");
+        "needed to fetch partition stats", writeIdList);
 
     // Table could be null if it does not exist anymore.
     if (table == null) {
@@ -1187,7 +1199,7 @@ public class CatalogServiceCatalog extends Catalog {
   private void addTableToCatalogDeltaHelper(Table tbl, GetCatalogDeltaContext ctx)
       throws TException {
     TCatalogObject catalogTbl =
-        new TCatalogObject(TCatalogObjectType.TABLE, Catalog.INITIAL_CATALOG_VERSION);
+        new TCatalogObject(TABLE, Catalog.INITIAL_CATALOG_VERSION);
     tbl.getLock().lock();
     try {
       long tblVersion = tbl.getCatalogVersion();
@@ -1821,8 +1833,8 @@ public class CatalogServiceCatalog extends Catalog {
    * and the current cached value will be returned. This may mean that a missing table
    * (not yet loaded table) will be returned.
    */
-  public Table getOrLoadTable(String dbName, String tblName, String reason)
-      throws CatalogException {
+  public Table getOrLoadTable(String dbName, String tblName, String reason,
+      ValidWriteIdList validWriteIdList) throws CatalogException {
     TTableName tableName = new TTableName(dbName.toLowerCase(), tblName.toLowerCase());
     TableLoadingMgr.LoadRequest loadReq;
 
@@ -1831,7 +1843,17 @@ public class CatalogServiceCatalog extends Catalog {
     versionLock_.readLock().lock();
     try {
       Table tbl = getTable(dbName, tblName);
-      if (tbl == null || tbl.isLoaded()) return tbl;
+      // tbl doesn't exist in the catalog
+      if (tbl == null) return null;
+      // if no validWriteIdList is provided, we return the tbl if its loaded
+      if (tbl.isLoaded() && validWriteIdList == null) return tbl;
+      // if a validWriteIdList is provided, we see if the cached table can provided a
+      // consistent view of the given validWriteIdList. If yes, we can return the table
+      // otherwise we reload the table.
+      if (tbl instanceof HdfsTable
+          && AcidUtils.compare((HdfsTable) tbl, validWriteIdList) >= 0) {
+        return tbl;
+      }
       previousCatalogVersion = tbl.getCatalogVersion();
       loadReq = tableLoadingMgr_.loadAsync(tableName, reason);
     } finally {
@@ -2986,9 +3008,18 @@ public class CatalogServiceCatalog extends Catalog {
     case VIEW: {
       Table table;
       try {
+        ValidWriteIdList writeIdList = null;
+        if (req.table_info_selector.valid_write_ids != null) {
+          Preconditions.checkState(objectDesc.type.equals(TABLE));
+          String dbName = objectDesc.getTable().db_name == null ? Catalog.DEFAULT_DB
+            : objectDesc.getTable().db_name;
+          String tblName = objectDesc.getTable().tbl_name;
+          writeIdList = MetastoreShim.getValidWriteIdListFromThrift(
+              dbName + "." + tblName, req.table_info_selector.valid_write_ids);
+        }
         table = getOrLoadTable(
             objectDesc.getTable().getDb_name(), objectDesc.getTable().getTbl_name(),
-            "needed by coordinator");
+            "needed by coordinator", writeIdList);
       } catch (DatabaseNotFoundException e) {
         return createGetPartialCatalogObjectError(CatalogLookupStatus.DB_NOT_FOUND);
       }
