@@ -274,9 +274,6 @@ public class Frontend {
 
   private final QueryEventHookManager queryHookManager_;
 
-  // Stores metastore clients for direct accesses to HMS.
-  private final MetaStoreClientPool metaStoreClientPool_;
-
   private final TransactionKeepalive transactionKeepalive_;
 
   private static ExecutorService checkAuthorizationPool_;
@@ -326,14 +323,8 @@ public class Frontend {
         BackendConfig.INSTANCE);
     queryHookManager_ = QueryEventHookManager.createFromConfig(BackendConfig.INSTANCE);
     if (!isBackendTest) {
-      metaStoreClientPool_ = new MetaStoreClientPool(1, 0);
-      if (MetastoreShim.getMajorVersion() > 2) {
-        transactionKeepalive_ = new TransactionKeepalive(metaStoreClientPool_);
-      } else {
-        transactionKeepalive_ = null;
-      }
+      transactionKeepalive_ = new TransactionKeepalive();
     } else {
-      metaStoreClientPool_ = null;
       transactionKeepalive_ = null;
     }
   }
@@ -1927,7 +1918,7 @@ public class Frontend {
    * @throws TransactionException
    */
   private long openTransaction(TQueryCtx queryCtx) throws TransactionException {
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       IMetaStoreClient hmsClient = client.getHiveClient();
       long transactionId = MetastoreShim.openTransaction(hmsClient);
       HeartbeatContext ctx = new HeartbeatContext(queryCtx, System.nanoTime());
@@ -1946,7 +1937,7 @@ public class Frontend {
    */
   public void abortTransaction(long txnId) throws TransactionException {
     LOG.error("Aborting transaction: " + Long.toString(txnId));
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       IMetaStoreClient hmsClient = client.getHiveClient();
       transactionKeepalive_.deleteTransaction(txnId);
       MetastoreShim.abortTransaction(hmsClient, txnId);
@@ -1975,7 +1966,7 @@ public class Frontend {
     Preconditions.checkState(table instanceof FeFsTable);
     Preconditions.checkState(
         AcidUtils.isTransactionalTable(table.getMetaStoreTable().getParameters()));
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       IMetaStoreClient hmsClient = client.getHiveClient();
       long txnId = queryCtx.getTransaction_id();
       return MetastoreShim.allocateTableWriteId(hmsClient, txnId, table.getDb().getName(),
@@ -2017,7 +2008,7 @@ public class Frontend {
       }
       lockComponents.add(lockComponent);
     }
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       IMetaStoreClient hmsClient = client.getHiveClient();
       MetastoreShim.acquireLock(hmsClient, txnId, lockComponents);
     }

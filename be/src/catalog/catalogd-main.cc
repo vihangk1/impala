@@ -49,6 +49,7 @@ DECLARE_string(ssl_private_key);
 DECLARE_string(ssl_private_key_password_cmd);
 DECLARE_string(ssl_cipher_list);
 DECLARE_string(ssl_minimum_version);
+DECLARE_bool(is_catalog);
 
 #include "common/names.h"
 
@@ -59,6 +60,7 @@ using namespace apache::thrift;
 int CatalogdMain(int argc, char** argv) {
   FLAGS_webserver_port = 25020;
   FLAGS_state_store_subscriber_port = 23020;
+  FLAGS_is_catalog = true;
   InitCommonRuntime(argc, argv, true);
   InitFeSupport();
 

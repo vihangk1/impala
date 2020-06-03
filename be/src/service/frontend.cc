@@ -77,6 +77,8 @@ DEFINE_string(authorized_proxy_group_config_delimiter, ",",
 DEFINE_string(kudu_master_hosts, "", "Specifies the default Kudu master(s). The given "
     "value should be a comma separated list of hostnames or IP addresses; ports are "
     "optional.");
+DEFINE_int32(coordinator_initial_hms_connections, 1,
+    "Number of connections which coordinator will initialized to the HMS at startup.");
 
 Frontend::Frontend() {
   JniMethodDescriptor methods[] = {

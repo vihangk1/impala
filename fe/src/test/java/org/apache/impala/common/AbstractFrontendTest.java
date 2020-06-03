@@ -17,6 +17,8 @@
 
 package org.apache.impala.common;
 
+import org.apache.impala.service.BackendConfig;
+import org.apache.impala.thrift.TBackendGflags;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -39,10 +41,14 @@ import org.junit.BeforeClass;
  * than do the generic methods in FrontendTestBase.
  */
 public abstract class AbstractFrontendTest {
-  protected static FrontendFixture feFixture_ = FrontendFixture.instance();
+  protected static FrontendFixture feFixture_;
 
   @BeforeClass
   public static void setUp() throws Exception {
+    if (BackendConfig.INSTANCE == null) {
+      BackendConfig.create(new TBackendGflags());
+    }
+    feFixture_ = FrontendFixture.instance();
     feFixture_.setUp();
   }
 

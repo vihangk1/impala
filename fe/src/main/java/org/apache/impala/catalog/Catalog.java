@@ -75,8 +75,6 @@ public abstract class Catalog implements AutoCloseable {
   public static final TUniqueId INITIAL_CATALOG_SERVICE_ID = new TUniqueId(0L, 0L);
   public static final String DEFAULT_DB = "default";
 
-  private final MetaStoreClientPool metaStoreClientPool_;
-
   // Cache of authorization policy metadata. Populated from data retried from the
   // Sentry Service, if configured.
   protected AuthorizationPolicy authPolicy_ = new AuthorizationPolicy();
@@ -88,7 +86,8 @@ public abstract class Catalog implements AutoCloseable {
       new AtomicReference<>(new ConcurrentHashMap<String, Db>());
 
   // Cache of data sources.
-  protected final CatalogObjectCache<DataSource> dataSources_;
+  protected final CatalogObjectCache<DataSource> dataSources_ =
+      new CatalogObjectCache<>();
 
   // Cache of known HDFS cache pools. Allows for checking the existence
   // of pools without hitting HDFS.
@@ -100,28 +99,7 @@ public abstract class Catalog implements AutoCloseable {
       new CatalogObjectCache<>();
 
   // This member is responsible for heartbeating HMS locks and transactions.
-  private TransactionKeepalive transactionKeepalive_;
-
-  /**
-   * Creates a new instance of Catalog backed by a given MetaStoreClientPool.
-   */
-  public Catalog(MetaStoreClientPool metaStoreClientPool) {
-    dataSources_ = new CatalogObjectCache<DataSource>();
-    metaStoreClientPool_ = Preconditions.checkNotNull(metaStoreClientPool);
-    if (MetastoreShim.getMajorVersion() > 2) {
-      transactionKeepalive_ = new TransactionKeepalive(metaStoreClientPool_);
-    } else {
-      transactionKeepalive_ = null;
-    }
-  }
-
-  /**
-   * Creates a Catalog instance with the default MetaStoreClientPool implementation.
-   * Refer to MetaStoreClientPool class for more details.
-   */
-  public Catalog() {
-    this(new MetaStoreClientPool(0, 0));
-  }
+  private TransactionKeepalive transactionKeepalive_ = new TransactionKeepalive();
 
   /**
    * Adds a new database to the catalog, replacing any existing database with the same
@@ -372,12 +350,14 @@ public abstract class Catalog implements AutoCloseable {
    * (additional calls will be no-ops).
    */
   @Override
-  public void close() { metaStoreClientPool_.close(); }
+  public void close() { MetaStoreClientPool.get().close(); }
 
   /**
    * Returns a managed meta store client from the client connection pool.
    */
-  public MetaStoreClient getMetaStoreClient() { return metaStoreClientPool_.getClient(); }
+  public MetaStoreClient getMetaStoreClient() {
+    return MetaStoreClientPool.get().getClient();
+  }
 
   /**
    * Return all members of 'candidates' that match 'matcher'.
@@ -729,7 +709,7 @@ public abstract class Catalog implements AutoCloseable {
     lockComponent.setOperationType(opType);
     List<LockComponent> lockComponents = Arrays.asList(lockComponent);
     long lockId = -1L;
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       lockId = MetastoreShim.acquireLock(client.getHiveClient(), txnId, lockComponents);
       if (txnId == 0L) transactionKeepalive_.addLock(lockId, ctx);
     }
@@ -741,7 +721,7 @@ public abstract class Catalog implements AutoCloseable {
    * @param lockId is the ID of the lock to clear.
    */
   public void releaseTableLock(long lockId) throws TransactionException {
-    try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+    try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
       transactionKeepalive_.deleteLock(lockId);
       MetastoreShim.releaseLock(client.getHiveClient(), lockId);
     }

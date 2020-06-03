@@ -157,4 +157,10 @@ struct TBackendGflags {
   66: required bool enable_column_masking
 
   67: required bool enable_insert_events
+
+  68: required i32 coordinator_initial_hms_connections
+
+  69: required i32 catalog_initial_hms_connections
+
+  70: required bool is_catalog
 }

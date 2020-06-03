@@ -187,7 +187,6 @@ import com.google.common.collect.Sets;
 public class CatalogServiceCatalog extends Catalog {
   public static final Logger LOG = LoggerFactory.getLogger(CatalogServiceCatalog.class);
 
-  private static final int INITIAL_META_STORE_CLIENT_POOL_SIZE = 10;
   private static final int MAX_NUM_SKIPPED_TOPIC_UPDATES = 2;
   // Timeout for acquiring a table lock
   // TODO: Make this configurable
@@ -288,10 +287,8 @@ public class CatalogServiceCatalog extends Catalog {
    * @throws ImpalaException
    */
   public CatalogServiceCatalog(boolean loadInBackground, int numLoadingThreads,
-      TUniqueId catalogServiceId, String localLibraryPath,
-      MetaStoreClientPool metaStoreClientPool)
+      TUniqueId catalogServiceId, String localLibraryPath)
       throws ImpalaException {
-    super(metaStoreClientPool);
     blacklistedDbs_ = CatalogBlacklistUtils.parseBlacklistedDbs(
         BackendConfig.INSTANCE.getBlacklistedDbs(), LOG);
     blacklistedTables_ = CatalogBlacklistUtils.parseBlacklistedTables(
@@ -319,19 +316,6 @@ public class CatalogServiceCatalog extends Catalog {
     Preconditions.checkState(PARTIAL_FETCH_RPC_QUEUE_TIMEOUT_S > 0);
     // start polling for metastore events
     metastoreEventProcessor_.start();
-  }
-
-  /**
-   * Initializes the Catalog using the default MetastoreClientPool impl.
-   * @param initialHmsCnxnTimeoutSec Time (in seconds) CatalogServiceCatalog will wait
-   * to establish an initial connection to the HMS before giving up.
-   */
-  public CatalogServiceCatalog(boolean loadInBackground, int numLoadingThreads,
-      int initialHmsCnxnTimeoutSec, TUniqueId catalogServiceId, String localLibraryPath)
-      throws ImpalaException {
-    this(loadInBackground, numLoadingThreads, catalogServiceId, localLibraryPath,
-        new MetaStoreClientPool(INITIAL_META_STORE_CLIENT_POOL_SIZE,
-            initialHmsCnxnTimeoutSec));
   }
 
   /**
