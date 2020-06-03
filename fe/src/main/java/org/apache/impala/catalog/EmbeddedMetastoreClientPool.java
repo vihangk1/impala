@@ -15,11 +15,10 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package org.apache.impala.testutil;
+package org.apache.impala.catalog;
 
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
-import org.apache.impala.catalog.MetaStoreClientPool;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.log4j.Logger;
 
@@ -31,9 +30,10 @@ import java.nio.file.Path;
  * database backed by local file system storage.
  *
  * Since local Derby db allows a single connection at any point, there is no use in
- * creating a metastore client pool bigger than that size.
+ * creating a metastore client pool bigger than that size. Currently, this pool is only
+ * used for tests.
  */
-public class EmbeddedMetastoreClientPool extends  MetaStoreClientPool {
+class EmbeddedMetastoreClientPool extends MetaStoreClientPool {
 
   private static final Logger LOG = Logger.getLogger(EmbeddedMetastoreClientPool.class);
 

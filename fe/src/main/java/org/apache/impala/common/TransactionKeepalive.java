@@ -17,27 +17,21 @@
 
 package org.apache.impala.common;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.impala.catalog.MetaStoreClientPool;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
-import org.apache.impala.common.TransactionException;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.thrift.TQueryCtx;
 import org.apache.log4j.Logger;
 
 import com.google.common.base.Preconditions;
-import com.sun.tools.javac.code.Attribute.Array;
 
 /**
  * Object of this class creates a daemon thread that periodically heartbeats the
@@ -53,8 +47,6 @@ public class TransactionKeepalive {
   private final long sleepIntervalMs_;
 
   final private Thread daemonThread_;
-
-  private final MetaStoreClientPool metaStoreClientPool_;
 
   // Stores information for logging purposes. Stores either a TQueryCtx or a cause
   // string. toString() returns the stored TQueryCtx if it is set or the string cause
@@ -143,7 +135,7 @@ public class TransactionKeepalive {
      */
     private void sendHeartbeatsFor(Map<Long, HeartbeatContext> transactions,
         Map<Long, HeartbeatContext> locks) {
-      try (MetaStoreClient client = metaStoreClientPool_.getClient()) {
+      try (MetaStoreClient client = MetaStoreClientPool.get().getClient()) {
         IMetaStoreClient hmsClient = client.getHiveClient();
         for (Map.Entry<Long, HeartbeatContext> entry : transactions.entrySet()) {
           HeartbeatContext ctx = entry.getValue();
@@ -207,13 +199,11 @@ public class TransactionKeepalive {
   /**
    * Creates TransactionKeepalive object and starts the background thread.
    */
-  public TransactionKeepalive(MetaStoreClientPool metaStoreClientPool) {
+  public TransactionKeepalive() {
     HiveConf hiveConf = new HiveConf(TransactionKeepalive.class);
     sleepIntervalMs_ = hiveConf.getTimeVar(
         HiveConf.ConfVars.HIVE_TXN_TIMEOUT, TimeUnit.MILLISECONDS) / 3;
     Preconditions.checkState(sleepIntervalMs_ > 0);
-    Preconditions.checkNotNull(metaStoreClientPool);
-    metaStoreClientPool_ = metaStoreClientPool;
     daemonThread_ = new Thread(new DaemonThread());
     daemonThread_.setDaemon(true);
     daemonThread_.setName("Transaction keepalive thread");

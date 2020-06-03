@@ -43,8 +43,15 @@ DEFINE_int32(max_nonhdfs_partitions_parallel_load, 20,
     "(Advanced) Number of threads used to load block metadata for tables that do not "
     "support the notion of blocks/storage IDs. Currently supported for S3/ADLS.");
 DEFINE_int32(initial_hms_cnxn_timeout_s, 120,
-    "Number of seconds catalogd will wait to establish an initial connection to the HMS "
-    "before exiting.");
+    "Number of seconds catalogd or coordinator will wait to establish an initial"
+    "connection to the HMS before exiting.");
+DEFINE_int32(catalog_initial_hms_connections, 10,
+    "Initial number of connections which catalog service initializes to HMS. Note that "
+    "actual number of connections to HMS could be more depending on the number of "
+    "concurrent HMS operations");
+DEFINE_bool(is_catalog, false, "This flag is used to detect if this is catalog"
+    " process. The catalog process sets this flag to true while the impalads see the"
+    " default value of the configuration.");
 
 Catalog::Catalog() {
   JniMethodDescriptor methods[] = {

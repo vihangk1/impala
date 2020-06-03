@@ -37,11 +37,16 @@ import java.util.UUID;
  * for testing.
  */
 public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
+  static {
+    // this property is used by MetastoreClientPool to instantiate a test client pool
+    System.setProperty("catalog.in.test", "true");
+  }
+
   public CatalogServiceTestCatalog(boolean loadInBackground, int numLoadingThreads,
-      TUniqueId catalogServiceId, MetaStoreClientPool metaStoreClientPool)
+      TUniqueId catalogServiceId)
       throws ImpalaException {
     super(loadInBackground, numLoadingThreads, catalogServiceId,
-        System.getProperty("java.io.tmpdir"), metaStoreClientPool);
+        System.getProperty("java.io.tmpdir"));
 
     // Cache pools are typically loaded asynchronously, but as there is no fixed execution
     // order for tests, the cache pools are loaded synchronously before the tests are
@@ -62,36 +67,12 @@ public class CatalogServiceTestCatalog extends CatalogServiceCatalog {
     FeSupport.loadLibrary();
     CatalogServiceCatalog cs;
     try {
-      if (MetastoreShim.getMajorVersion() > 2) {
-        MetastoreShim.setHiveClientCapabilities();
-      }
-      cs = new CatalogServiceTestCatalog(false, 16, new TUniqueId(),
-          new MetaStoreClientPool(0, 0));
+      cs = new CatalogServiceTestCatalog(false, 16, new TUniqueId());
       cs.setAuthzManager(authzFactory.newAuthorizationManager(cs));
       cs.reset();
     } catch (ImpalaException e) {
       throw new IllegalStateException(e.getMessage(), e);
     }
-    return cs;
-  }
-
-  /**
-   * Creates a transient test catalog instance backed by an embedded HMS derby database on
-   * the local filesystem. The derby database is created from scratch and has no table
-   * metadata.
-   */
-  public static CatalogServiceCatalog createTransientTestCatalog() throws
-      ImpalaException {
-    FeSupport.loadLibrary();
-    Path derbyPath = Paths.get(System.getProperty("java.io.tmpdir"),
-        UUID.randomUUID().toString());
-    if (MetastoreShim.getMajorVersion() > 2) {
-      MetastoreShim.setHiveClientCapabilities();
-    }
-    CatalogServiceCatalog cs = new CatalogServiceTestCatalog(false, 16,
-        new TUniqueId(), new EmbeddedMetastoreClientPool(0, derbyPath));
-    cs.setAuthzManager(new NoopAuthorizationManager());
-    cs.reset();
     return cs;
   }
 

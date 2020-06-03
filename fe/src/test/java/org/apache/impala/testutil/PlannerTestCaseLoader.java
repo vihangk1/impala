@@ -56,7 +56,7 @@ public class PlannerTestCaseLoader implements AutoCloseable {
 
   public PlannerTestCaseLoader() throws ImpalaException {
     catalog_ = new ImpaladTestCatalog(
-        CatalogServiceTestCatalog.createTransientTestCatalog());
+        CatalogServiceTestTransientCatalog.create());
     frontend_ = new Frontend(new NoopAuthorizationFactory(), catalog_);
     catalogOpExecutor_ = new CatalogOpExecutor(catalog_.getSrcCatalog(),
         new NoopAuthorizationFactory().getAuthorizationConfig(),

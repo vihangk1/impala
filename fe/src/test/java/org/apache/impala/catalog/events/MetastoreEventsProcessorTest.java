@@ -1491,10 +1491,9 @@ public class MetastoreEventsProcessorTest {
     private String tblName_;
 
     private FakeCatalogServiceCatalogForFlagTests(boolean loadInBackground,
-        int numLoadingThreads, TUniqueId catalogServiceId, String localLibraryPath,
-        MetaStoreClientPool metaStoreClientPool) throws ImpalaException {
-      super(loadInBackground, numLoadingThreads, catalogServiceId, localLibraryPath,
-          metaStoreClientPool);
+        int numLoadingThreads, TUniqueId catalogServiceId, String localLibraryPath)
+        throws ImpalaException {
+      super(loadInBackground, numLoadingThreads, catalogServiceId, localLibraryPath);
     }
 
     public static CatalogServiceCatalog create() {
@@ -1502,7 +1501,7 @@ public class MetastoreEventsProcessorTest {
       CatalogServiceCatalog cs;
       try {
         cs = new FakeCatalogServiceCatalogForFlagTests(false, 16, new TUniqueId(),
-            System.getProperty("java.io.tmpdir"), new MetaStoreClientPool(0, 0));
+            System.getProperty("java.io.tmpdir"));
         cs.setAuthzManager(new NoopAuthorizationManager());
         cs.reset();
       } catch (ImpalaException e) {

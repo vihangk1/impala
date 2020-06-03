@@ -124,13 +124,8 @@ public class JniCatalog {
 
     final AuthorizationConfig authzConfig = authzFactory.getAuthorizationConfig();
 
-    if (MetastoreShim.getMajorVersion() > 2) {
-      MetastoreShim.setHiveClientCapabilities();
-    }
-
     catalog_ = new CatalogServiceCatalog(cfg.load_catalog_in_background,
-        cfg.num_metadata_loading_threads, cfg.initial_hms_cnxn_timeout_s, getServiceId(),
-        cfg.local_library_path);
+        cfg.num_metadata_loading_threads, getServiceId(), cfg.local_library_path);
     authzManager_ = authzFactory.newAuthorizationManager(catalog_);
     catalog_.setAuthzManager(authzManager_);
     try {

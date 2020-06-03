@@ -67,7 +67,7 @@ import com.google.errorprone.annotations.Immutable;
  * (filesystem, HMS, etc) with no caching.
  */
 class DirectMetaProvider implements MetaProvider {
-  private static MetaStoreClientPool msClientPool_;
+  private static MetaStoreClientPool msClientPool_ ;
 
   DirectMetaProvider() {
     initMsClientPool();
@@ -75,14 +75,8 @@ class DirectMetaProvider implements MetaProvider {
 
   private static synchronized void initMsClientPool() {
     // Lazy-init the metastore client pool based on the backend configuration.
-    // TODO(todd): this should probably be a process-wide singleton.
     if (msClientPool_ == null) {
-      TBackendGflags cfg = BackendConfig.INSTANCE.getBackendCfg();
-      if (MetastoreShim.getMajorVersion() > 2) {
-        MetastoreShim.setHiveClientCapabilities();
-      }
-      msClientPool_ = new MetaStoreClientPool(cfg.num_metadata_loading_threads,
-          cfg.initial_hms_cnxn_timeout_s);
+      msClientPool_ = MetaStoreClientPool.get();
     }
   }
 

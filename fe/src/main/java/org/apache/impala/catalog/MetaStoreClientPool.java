@@ -17,6 +17,9 @@
 
 package org.apache.impala.catalog;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 
@@ -27,9 +30,14 @@ import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
-import org.apache.log4j.Logger;
+import org.apache.impala.compat.MetastoreShim;
+import org.apache.impala.service.BackendConfig;
+import org.apache.impala.thrift.TBackendGflags;
 
 import com.google.common.base.Preconditions;
+import com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Manages a pool of RetryingMetaStoreClient connections. If the connection pool is empty
@@ -52,8 +60,10 @@ public class MetaStoreClientPool {
   // Number of milliseconds to sleep between creation of HMS connections. Used to debug
   // IMPALA-825.
   private final int clientCreationDelayMs_;
+  // singleton instance of this MetastoreClientPool
+  private static MetaStoreClientPool pool_;
 
-  private static final Logger LOG = Logger.getLogger(MetaStoreClientPool.class);
+  private static final Logger LOG = LoggerFactory.getLogger(MetaStoreClientPool.class);
 
   private final ConcurrentLinkedQueue<MetaStoreClient> clientPool_ =
       new ConcurrentLinkedQueue<MetaStoreClient>();
@@ -151,11 +161,117 @@ public class MetaStoreClientPool {
     }
   }
 
-  public MetaStoreClientPool(int initialSize, int initialCnxnTimeoutSec) {
-    this(initialSize, initialCnxnTimeoutSec, new HiveConf(MetaStoreClientPool.class));
+  /**
+   * Returns the instance of MetastoreClientPool if it already exists. Else, creates one
+   * based on configuration and returns it.
+   */
+  public static synchronized MetaStoreClientPool get() {
+    if (pool_ != null) return pool_;
+
+    if (MetastoreShim.getMajorVersion() > 2) {
+      MetastoreShim.setHiveClientCapabilities();
+    }
+    pool_ = getMetastoreClientPool();
+    return pool_;
   }
 
-  public MetaStoreClientPool(int initialSize, int initialCnxnTimeoutSec,
+  /**
+   * Creates appropriate pool based on the environment.
+   */
+  private static MetaStoreClientPool getMetastoreClientPool() {
+    if (isTestMode()) {
+      if (useEmbeddedClientPool()) return getEmbeddedPool();
+      return getPoolForTests();
+    }
+    Preconditions
+        .checkNotNull(BackendConfig.INSTANCE, "Backend configuration is not"
+            + " initialized");
+    TBackendGflags cfg = BackendConfig.INSTANCE.getBackendCfg();
+    if (cfg.is_catalog) return getPoolForCatalog();
+    return getPoolForCoordinator();
+  }
+
+  /**
+   * Certain fe units tests instantiate Catalog service without backend services. They
+   * must set the system property {@code catalog.in.test} to true.
+   */
+  private static boolean isTestMode() {
+    return Boolean.parseBoolean(System.getProperty("catalog.in.test", "false"));
+  }
+
+  /**
+   * Some fe unit tests instantiate a embedded client pool. They must set the system
+   * property {@code catalog.test.mode} to embedded.
+   * @return
+   */
+  private static boolean useEmbeddedClientPool() {
+    Preconditions.checkState(isTestMode());
+    return "embedded".equals(System.getProperty("catalog.test.mode", ""));
+  }
+
+  /**
+   * Creates a Embedded metastore client pool. Currently used for certain tests.
+   */
+  private static MetaStoreClientPool getEmbeddedPool() {
+    LOG.info(
+        "Initializing embedded metastore client connection pool of size 1"
+            + " and timeout 0 seconds.");
+    Path derbyPath = Paths.get(System.getProperty("java.io.tmpdir"),
+        UUID.randomUUID().toString());
+    return new EmbeddedMetastoreClientPool(0, derbyPath);
+  }
+
+  /**
+   * Creates a Metastore Client pool for Catalog service. It uses a pool size based on
+   * backend configuration property {@code catalog_initial_hms_connections}
+   */
+  private static MetaStoreClientPool getPoolForCatalog() {
+    TBackendGflags cfg = BackendConfig.INSTANCE.getBackendCfg();
+    final int size = cfg.catalog_initial_hms_connections;
+    Preconditions.checkState(size >= 0);
+    LOG.info(
+        "Initializing metastore client connection pool for catalog of size {}"
+            + " and timeout {} seconds.",
+        size, cfg.initial_hms_cnxn_timeout_s);
+    return new MetaStoreClientPool(size,
+        cfg.initial_hms_cnxn_timeout_s, new HiveConf(MetaStoreClientPool.class));
+  }
+
+  /**
+   * Creates a Metastore client pool to be used in Coordinators. It uses a different pool
+   * size than when instantiated for Catalog service which can be configured using the
+   * backend configuration property {@code coordinator_initial_hms_connections}.
+   * @return
+   */
+  private static MetaStoreClientPool getPoolForCoordinator() {
+    Preconditions
+        .checkNotNull(BackendConfig.INSTANCE, "Backend configuration is not"
+            + " initialized");
+    int poolSize = BackendConfig.INSTANCE
+        .getBackendCfg().coordinator_initial_hms_connections;
+    Preconditions.checkState(poolSize >= 0);
+    LOG.info(
+        "Initializing metastore client connection pool for coordinator of size {} "
+            + "and timeout 0 seconds.", poolSize);
+    //TODO (Vihang) why do we need a timeout of 0?
+    return new MetaStoreClientPool(poolSize, 0,
+        new HiveConf(MetaStoreClientPool.class));
+  }
+
+  /**
+   * Creates a new MetastoreClientPool for tests. The default initial number of clients
+   * in the pool is 1 (additional clients are created on-demand). To be used for
+   * tests only.
+   */
+  private static MetaStoreClientPool getPoolForTests() {
+    LOG.info(
+        "Initializing metastore client connection pool for tests of size 10 "
+            + "and timeout 0 seconds.");
+    return new MetaStoreClientPool(1, 0, new HiveConf(MetaStoreClientPool.class));
+  }
+
+  @VisibleForTesting
+  protected MetaStoreClientPool(int initialSize, int initialCnxnTimeoutSec,
       HiveConf hiveConf) {
     hiveConf_ = hiveConf;
     clientCreationDelayMs_ = hiveConf_.getInt(HIVE_METASTORE_CNXN_DELAY_MS_CONF,
@@ -223,6 +339,16 @@ public class MetaStoreClientPool {
     MetaStoreClient client = null;
     while ((client = clientPool_.poll()) != null) {
       client.getHiveClient().close();
+    }
+    // if this pool is an instance of EmbeddedMetastoreClientPool
+    // closeing the metastore client pool also means shutting down
+    // the embedded metastore service. We should unset the pool_ variable
+    // here so that next invocation of get() reinitializes a new embedded
+    // metastore.
+    if (pool_ instanceof EmbeddedMetastoreClientPool) {
+      synchronized (MetaStoreClientPool.class) {
+        pool_ = null;
+      }
     }
   }
 }

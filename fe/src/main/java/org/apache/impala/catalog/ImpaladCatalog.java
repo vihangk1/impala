@@ -100,7 +100,6 @@ public class ImpaladCatalog extends Catalog implements FeCatalog {
 
   public ImpaladCatalog(String defaultKuduMasterHosts,
       AtomicReference<? extends AuthorizationChecker> authzChecker) {
-    super();
     authzChecker_ = authzChecker;
     addDb(BuiltinsDb.getInstance());
     defaultKuduMasterHosts_ = defaultKuduMasterHosts;
