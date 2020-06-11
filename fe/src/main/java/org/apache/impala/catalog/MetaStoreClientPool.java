@@ -265,7 +265,7 @@ public class MetaStoreClientPool {
    */
   private static MetaStoreClientPool getPoolForTests() {
     LOG.info(
-        "Initializing metastore client connection pool for tests of size 10 "
+        "Initializing metastore client connection pool for tests of size 1 "
             + "and timeout 0 seconds.");
     return new MetaStoreClientPool(1, 0, new HiveConf(MetaStoreClientPool.class));
   }
@@ -347,6 +347,7 @@ public class MetaStoreClientPool {
     // metastore.
     if (pool_ instanceof EmbeddedMetastoreClientPool) {
       synchronized (MetaStoreClientPool.class) {
+        LOG.info("Resetting the metastore client pool.");
         pool_ = null;
       }
     }

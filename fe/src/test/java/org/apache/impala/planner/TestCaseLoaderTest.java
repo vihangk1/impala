@@ -22,10 +22,13 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.impala.catalog.Catalog;
 import org.apache.impala.catalog.Db;
+import org.apache.impala.catalog.EmbeddedMetastoreClientPool;
+import org.apache.impala.catalog.MetaStoreClientPool;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.testutil.PlannerTestCaseLoader;
 import org.apache.impala.util.PatternMatcher;
 import org.apache.log4j.Logger;
+import org.junit.Assert;
 import org.junit.Test;
 
 import java.util.List;
@@ -57,8 +60,16 @@ public class TestCaseLoaderTest {
     for (int i = 0; i < maxIterations; ++i) {
       FileStatus fs = testCaseFiles[rand.nextInt(testCaseFiles.length)];
       if (!fs.getPath().getName().contains(TESTCASE_FILE_PREFIX)) continue;
+      java.nio.file.Path prevPath = null;
+      java.nio.file.Path currentPath;
       try (PlannerTestCaseLoader testCaseLoader = new PlannerTestCaseLoader()) {
         Catalog srcCatalog = testCaseLoader.getSrcCatalog();
+        // debug checks
+        assert(MetaStoreClientPool.get() instanceof EmbeddedMetastoreClientPool);
+        currentPath = ((EmbeddedMetastoreClientPool) MetaStoreClientPool.get())
+            .getDerbyDataStorePath();
+        Assert.assertNotEquals(prevPath, currentPath);
+        prevPath = currentPath;
         // Make sure the catalog is empty (just the default database).
         List<Db> dbs = srcCatalog.getDbs(PatternMatcher.MATCHER_MATCH_ALL);
         assert dbs.size() == 1 && dbs.get(0).getName().equals("default");

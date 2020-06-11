@@ -33,14 +33,14 @@ import java.nio.file.Path;
  * creating a metastore client pool bigger than that size. Currently, this pool is only
  * used for tests.
  */
-class EmbeddedMetastoreClientPool extends MetaStoreClientPool {
+public class EmbeddedMetastoreClientPool extends MetaStoreClientPool {
 
   private static final Logger LOG = Logger.getLogger(EmbeddedMetastoreClientPool.class);
 
   private static final String CONNECTION_URL_TEMPLATE =
       "jdbc:derby:;databaseName=%s;create=true";
 
-  private Path derbyDataStorePath_;
+  private final Path derbyDataStorePath_;
 
   public EmbeddedMetastoreClientPool(int initialCnxnTimeoutSec, Path dbStorePath) {
     super(1, initialCnxnTimeoutSec, generateEmbeddedHMSConf(dbStorePath));
@@ -98,4 +98,6 @@ class EmbeddedMetastoreClientPool extends MetaStoreClientPool {
     // Cleanup the metastore directory.
     FileUtils.deleteQuietly(derbyDataStorePath_.toFile());
   }
+
+  public Path getDerbyDataStorePath() { return derbyDataStorePath_; }
 }
