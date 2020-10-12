@@ -25,8 +25,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.ReentrantLock;
 
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TableType;
@@ -79,7 +82,9 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   protected final String owner_;
   protected TAccessLevel accessLevel_ = TAccessLevel.READ_WRITE;
   // Lock protecting this table
-  private final ReentrantLock tableLock_ = new ReentrantLock();
+  private final ReentrantReadWriteLock tableLock_ = new ReentrantReadWriteLock(true);
+  private final ReadLock readLock_ = tableLock_.readLock();
+  private final WriteLock writeLock_ = tableLock_.writeLock();
 
   // Number of clustering columns.
   protected int numClusteringCols_;
@@ -134,6 +139,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   // avoid unnecessary refresh when the event is received
   private final InFlightEvents inFlightEvents = new InFlightEvents();
 
+  public static final int NUMBER_OF_ATTEMPTS_TO_UPDATE_VERSION = 10;
   // Table metrics. These metrics are applicable to all table types. Each subclass of
   // Table can define additional metrics specific to that table type.
   public static final String REFRESH_DURATION_METRIC = "refresh-duration";
@@ -203,7 +209,52 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
         .parseBoolean(msTbl.getParameters().get(TBL_PROP_EXTERNAL_TABLE_PURGE));
   }
 
-  public ReentrantLock getLock() { return tableLock_; }
+  public void takeReadLock() {
+    readLock_.lock();
+  }
+
+  public ReadLock readLock() { return readLock_; }
+  public WriteLock writeLock() { return writeLock_; }
+
+  public void releaseReadLock() {
+    readLock_.unlock();
+  }
+
+  public boolean isReadLockedByCurrentThread() {
+    return tableLock_.getReadHoldCount() > 0;
+  }
+
+  public boolean tryReadLock() {
+    try {
+      // a tryLock with a 0 timeout honors the fairness for lock acquisition
+      // in case there are other threads waiting to acquire a read lock when
+      // compared to tryLock() which "barges" in and takes a read lock if
+      // available with no consideration to other threads waiting for a read lock.
+      return readLock_.tryLock(0, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      // ignored
+    }
+    return false;
+  }
+
+  public void releaseWriteLock() {
+    writeLock_.unlock();
+  }
+
+  /**
+   * Returns true if this table is write locked by current thread.
+   */
+  public boolean isWriteLockedByCurrentThread() {
+    return writeLock_.isHeldByCurrentThread();
+  }
+
+  /**
+   * Returns true if this table is write locked by any thread.
+   */
+  public boolean isWriteLocked() {
+    return tableLock_.isWriteLocked();
+  }
+
   @Override
   public abstract TTableDescriptor toThriftDescriptor(
       int tableId, Set<Long> referencedPartitions);
@@ -492,7 +543,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     // the table lock should already be held, and we want the toThrift() to be consistent
     // with the modification. So this check helps us identify places where the lock
     // acquisition is probably missing entirely.
-    if (!tableLock_.isHeldByCurrentThread()) {
+    if (!isLockedByCurrentThread()) {
       throw new IllegalStateException(
           "Table.toThrift() called without holding the table lock: " +
               getFullName() + " " + getClass().getName());
@@ -522,6 +573,10 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     table.setMetastore_table(msTable);
     table.setTable_stats(tableStats_);
     return table;
+  }
+
+  private boolean isLockedByCurrentThread() {
+    return isReadLockedByCurrentThread() || tableLock_.isWriteLockedByCurrentThread();
   }
 
   public TCatalogObject toMinimalTCatalogObject() {
@@ -809,7 +864,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
    */
   public boolean removeFromVersionsForInflightEvents(
       boolean isInsertEvent, long versionNumber) {
-    Preconditions.checkState(tableLock_.isHeldByCurrentThread(),
+    Preconditions.checkState(isWriteLockedByCurrentThread(),
         "removeFromVersionsForInFlightEvents called without taking the table lock on "
             + getFullName());
     return inFlightEvents.remove(isInsertEvent, versionNumber);
@@ -831,7 +886,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     // we generally don't take locks on Incomplete tables since they are atomically
     // replaced during load
     Preconditions.checkState(
-        this instanceof IncompleteTable || tableLock_.isHeldByCurrentThread());
+        this instanceof IncompleteTable || isWriteLockedByCurrentThread());
     if (!inFlightEvents.add(isInsertEvent, versionNumber)) {
       LOG.warn(String.format("Could not add %s version to the table %s. This could "
           + "cause unnecessary refresh of the table when the event is received by the "

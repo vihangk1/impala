@@ -74,6 +74,16 @@ DEFINE_int64_hidden(catalog_partial_fetch_rpc_queue_timeout_s, LLONG_MAX, "Maxim
     "(in seconds) a partial catalog object fetch RPC spends in the queue waiting "
     "to run. Must be set to a value greater than zero.");
 
+DEFINE_int32(catalog_max_lock_skipped_topic_updates, 2, "Maximum number of topic "
+    "updates skipped for a table due to lock contention in catalogd after which it must"
+    "be added to the topic the update log.");
+
+DEFINE_int64(topic_update_tbl_max_wait_time_ms, 500, "Maximum time "
+     "(in milliseconds) catalog will wait to acquire lock on table. The table lock is "
+     "acquired before updating the metadata of the table by statements like refresh or "
+     "table level alter statements.");
+
+
 DECLARE_string(debug_actions);
 DECLARE_string(state_store_host);
 DECLARE_int32(state_store_subscriber_port);
