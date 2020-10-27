@@ -45,6 +45,8 @@ import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogHmsAPIHelper;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.common.Metrics;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
+import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.service.BackendConfig;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
@@ -61,9 +63,9 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
   private static final Logger LOG = LoggerFactory
       .getLogger(CatalogMetastoreServiceHandler.class);
 
-  public CatalogMetastoreServiceHandler(CatalogServiceCatalog catalog, Metrics metrics,
+  public CatalogMetastoreServiceHandler(CatalogServiceCatalog catalog,
       boolean fallBackToHMSOnErrors) {
-    super(catalog, metrics, fallBackToHMSOnErrors);
+    super(catalog, fallBackToHMSOnErrors);
   }
 
   @Override
@@ -113,11 +115,13 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
       }
     } catch (Exception e) {
       // we catch the CatalogException and fall-back to HMS
-      throwIfNoFallback(e, GET_PARTITION_BY_EXPR);
+      throwIfNoFallback(e, HmsApiNameEnum.GET_PARTITION_BY_EXPR.apiName());
     }
     String tblName =
         partitionsByExprRequest.getDbName() + "." + partitionsByExprRequest.getTblName();
-    LOG.info(String.format(HMS_FALLBACK_MSG_FORMAT, GET_PARTITION_BY_EXPR, tblName));
+    LOG.info(String
+        .format(HMS_FALLBACK_MSG_FORMAT, HmsApiNameEnum.GET_PARTITION_BY_EXPR.apiName(),
+            tblName));
     return super.get_partitions_by_expr(partitionsByExprRequest);
   }
 
@@ -141,7 +145,7 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
       return CatalogHmsAPIHelper
           .getPartitionsByNames(catalog_, serverConf_, getPartitionsByNamesRequest);
     } catch (Exception ex) {
-      throwIfNoFallback(ex, GET_PARTITION_BY_NAMES);
+      throwIfNoFallback(ex, HmsApiNameEnum.GET_PARTITION_BY_NAMES.apiName());
     }
     return super.get_partitions_by_names_req(getPartitionsByNamesRequest);
   }
