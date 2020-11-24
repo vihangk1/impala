@@ -85,6 +85,7 @@ import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.ColumnNotFoundException;
 import org.apache.impala.catalog.ColumnStats;
 import org.apache.impala.catalog.DataSource;
+import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeCatalogUtils;
 import org.apache.impala.catalog.IcebergTable;
@@ -702,11 +703,11 @@ public class CatalogOpExecutor {
    * @throws CatalogException if the db is not found
    */
   public boolean addTableIfNotExists(String dbName, String tblName)
-      throws CatalogException {
+      throws DatabaseNotFoundException {
     synchronized (metastoreDdlLock_) {
       Db db = catalog_.getDb(dbName);
       if (db == null) {
-        throw new CatalogException(String.format("Db %s does not exist", dbName));
+        throw new DatabaseNotFoundException(String.format("Db %s does not exist", dbName));
       }
       Table existingTable = db.getTable(tblName);
       if (existingTable != null) return false;

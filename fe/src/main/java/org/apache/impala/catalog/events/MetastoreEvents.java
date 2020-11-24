@@ -587,8 +587,8 @@ public class MetastoreEvents {
           // eg. table doesn't exist in HMS anymore or table schema is not supported
           // or Kudu threw an exception due to some internal error. There is not much
           // we can do here other than log it appropriately.
-          debugLog("Refresh table {} failed due to error {}",
-              getFullyQualifiedTblName(), e.getMessage(), e);
+          debugLog("Table {} was not refreshed due to error {}",
+              getFullyQualifiedTblName(), e.getMessage());
           return false;
         } else {
           throw e;
@@ -703,7 +703,7 @@ public class MetastoreEvents {
      * overridden. Else, it will ignore the event
      */
     @Override
-    public void process() throws MetastoreNotificationException {
+    public void process() {
       // check if the table exists already. This could happen in corner cases of the
       // table being dropped and recreated with the same name or in case this event is
       // a self-event (see description of self-event in the class documentation of
@@ -714,17 +714,14 @@ public class MetastoreEvents {
               "Not adding the table {} since it already exists in catalog", tblName_);
           return;
         }
-      } catch (CatalogException e) {
+        debugLog("Added a table {}", getFullyQualifiedTblName());
+      } catch (DatabaseNotFoundException e) {
         // if a exception is thrown, it could be due to the fact that the db did not
-        // exist in the catalog cache. This could only happen if the previous
-        // create_database event for this table errored out
-        throw new MetastoreNotificationException(debugString(
-            "Unable to add table while processing for table %s because the "
-                + "database doesn't exist. This could be due to a previous error while "
-                + "processing CREATE_DATABASE event for the database %s",
-            getFullyQualifiedTblName(), dbName_), e);
+        // exist in the catalog cache. This is possible in case the database was removed
+        // from impala by the time this event is received.
+        debugLog("Table {} was not refreshed due to error {}",
+            getFullyQualifiedTblName(), e.getMessage());
       }
-      debugLog("Added a table {}", getFullyQualifiedTblName());
     }
 
     @Override
