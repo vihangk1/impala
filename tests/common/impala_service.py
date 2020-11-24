@@ -116,7 +116,7 @@ class BaseImpalaService(object):
     def equals(value, expected):
       return value == expected
 
-    self.wait_for_metric_value_fn(metric_name, expected_value, equals, timeout, interval)
+    return self.wait_for_metric_value_fn(metric_name, expected_value, equals, timeout, interval)
 
   def wait_for_metric_value_fn(self, metric_name, expected_value, fn, timeout=10,
       interval=1):
