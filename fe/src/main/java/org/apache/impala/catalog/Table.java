@@ -25,8 +25,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
@@ -81,8 +79,11 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   protected final String name_;
   protected final String owner_;
   protected TAccessLevel accessLevel_ = TAccessLevel.READ_WRITE;
-  // Lock protecting this table
-  private final ReentrantReadWriteLock tableLock_ = new ReentrantReadWriteLock(true);
+  // Lock protecting this table. A read lock must be table when we are serializing
+  // the table contents over thrift (e.g when returning the table to clients over thrift
+  // or when topic-update thread serializes the table in the topic update)
+  // A write lock must be table when the table is being modified (e.g. DDLs or refresh)
+  private final ReentrantReadWriteLock tableLock_ = new ReentrantReadWriteLock(true /*fair ordering*/);
   private final ReadLock readLock_ = tableLock_.readLock();
   private final WriteLock writeLock_ = tableLock_.writeLock();
 
@@ -139,7 +140,6 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   // avoid unnecessary refresh when the event is received
   private final InFlightEvents inFlightEvents = new InFlightEvents();
 
-  public static final int NUMBER_OF_ATTEMPTS_TO_UPDATE_VERSION = 10;
   // Table metrics. These metrics are applicable to all table types. Each subclass of
   // Table can define additional metrics specific to that table type.
   public static final String REFRESH_DURATION_METRIC = "refresh-duration";

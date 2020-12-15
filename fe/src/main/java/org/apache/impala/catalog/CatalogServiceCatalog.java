@@ -450,13 +450,18 @@ public class CatalogServiceCatalog extends Catalog {
   public boolean tryLock(Table tbl, final boolean useWriteLock, final long timeout) {
     Preconditions.checkArgument(timeout > 0);
     try (ThreadNameAnnotator tna = new ThreadNameAnnotator(
-        "Attempting to lock table " + tbl.getFullName())) {
+        String.format("Attempting to %s lock table %s with a timeout of %s ms",
+            (useWriteLock ? "write" : "read"), tbl.getFullName(), timeout))) {
       long begin = System.currentTimeMillis();
       long end;
       do {
         versionLock_.writeLock().lock();
         Lock lock = useWriteLock ? tbl.writeLock() : tbl.readLock();
         try {
+          //Note that we don't use the timeout directly here since the timeout
+          //since we don't want to unnecessarily hold the versionLock if the table
+          //cannot be acquired. Holding version lock can potentially blocks other
+          //unrelated DDL operations.
           if (lock.tryLock(0, TimeUnit.SECONDS)) {
             if (LOG.isTraceEnabled()) {
               end = System.currentTimeMillis();
@@ -476,6 +481,7 @@ public class CatalogServiceCatalog extends Catalog {
       return false;
     }
   }
+
   /**
    * Similar to tryLock on a table, but works on a database object instead of Table.
    * TODO: Refactor the code so that both table and db can be "lockable" using a single
@@ -1387,20 +1393,27 @@ public class CatalogServiceCatalog extends Catalog {
    */
   private boolean lockHdfsTblWithTimeout(long tblVersion, HdfsTable hdfsTable,
       GetCatalogDeltaContext ctx) {
-    int maxAttempts = 2;
+    // see the comment below on why we need 2 attempts.
+    final int maxAttempts = 2;
     int attemptCount = 0;
     boolean lockAcquired;
     do {
       attemptCount++;
-      lockAcquired = tryLock(hdfsTable, false, topicUpdateTblLockMaxWaitTimeMs);
+      // topicUpdateTblLockMaxWaitTimeMs indicates the total amount of time we are willing
+      // to wait to acquire the table lock. We make 2 attempts and hence the timeout here
+      // is topicUpdateTblLockMaxWaitTimeMs/2 so that overall the method waits for
+      // maximum of topicUpdateTblLockMaxWaitTimeMs for the lock.
+      long timeoutMs = topicUpdateTblLockMaxWaitTimeMs/maxAttempts;
+      lockAcquired = tryLock(hdfsTable, false, timeoutMs);
       if (lockAcquired) {
         // table lock was successfully acquired. We can now release the versionLock.
         versionLock_.writeLock().unlock();
-        break;
+        return true;
       }
       // If we reach here, the topic update thread could not take a lock on this table.
-      // We should bump up the table version so that this gets included in the next topic
-      // update. However, there is a race here. If we update the pending version here
+      // We should bump up the pending table version so that this gets included in the
+      // next topic update. However, there is a race condition which needs to be handled
+      // here. If we update the pending version here
       // after hdfsTable.setCatalogVersion() is called from CatalogOpExecutor, the bump up
       // of pendingVersion takes no effect. Hence we detect such case by comparing the
       // tbl version with the expected tblVersion. if the tblVersion does not match, it
@@ -1416,9 +1429,7 @@ public class CatalogServiceCatalog extends Catalog {
       // if pendingVersionUpdated is false it means that tblVersion has been changed
       // and hence we didn't update the pendingVersion. We retry once to acquire a read
       // lock.
-      //TODO(Vihang): check if the table is writeLocked here and bail out early
     } while (attemptCount != maxAttempts);
-    if (lockAcquired) return true;
     // lock could not be acquired, we update the skip count in the topicUpdate entry
     // if applicable.
     TopicUpdateLog.Entry topicUpdateEntry = topicUpdateLog_
@@ -2213,6 +2224,11 @@ public class CatalogServiceCatalog extends Catalog {
         deleteLog_.addRemovedObject(existingTbl.toMinimalTCatalogObject());
       }
       updatedTbl.setCatalogVersion(incrementAndGetCatalogVersion());
+      // note that we update the db with a new instance of table. In such case
+      // we may lose the some temporary state stored in the old table like pendingVersion
+      // This is okay since the table version is bumped up to the next topic update window
+      // and eventually the table will need to added to the topic update if hits the
+      // MAX_NUM_SKIPPED_TOPIC_UPDATES limit.
       db.addTable(updatedTbl);
       return updatedTbl;
     } finally {
@@ -3384,7 +3400,6 @@ public class CatalogServiceCatalog extends Catalog {
       }
       Map<HdfsPartition, TPartialPartitionInfo> missingPartialInfos;
       TGetPartialCatalogObjectResponse resp;
-      // TODO(todd): consider a read-write lock here.
       table.takeReadLock();
       try {
         if (table instanceof HdfsTable || table instanceof IcebergTable) {

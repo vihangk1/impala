@@ -668,12 +668,6 @@ public class CatalogOpExecutor {
     tryWriteLock(tbl);
     // Get a new catalog version to assign to the table being altered.
     long newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
-    if (tbl instanceof HdfsTable) {
-      // store the newCatalogVersion to be used for this alter operation
-      // in the pendingVersion so that topic update thread can evaluate if this
-      // table needs to be skipped from the topics in case it gets blocked.
-      ((HdfsTable) tbl).updatePendingVersion(tbl.getCatalogVersion(), newCatalogVersion);
-    }
     addCatalogServiceIdentifiers(tbl, catalog_.getCatalogServiceId(), newCatalogVersion);
     final Timer.Context context
         = tbl.getMetrics().getTimer(Table.ALTER_DURATION_METRIC).time();
@@ -970,7 +964,7 @@ public class CatalogOpExecutor {
   private void alterIcebergTable(TAlterTableParams params, TDdlExecResponse response,
       IcebergTable tbl, long newCatalogVersion, boolean wantMinimalResult)
       throws ImpalaException {
-    Preconditions.checkState(tbl.getLock().isHeldByCurrentThread());
+    Preconditions.checkState(tbl.isWriteLockedByCurrentThread());
     switch (params.getAlter_type()) {
       case ADD_COLUMNS:
         TAlterTableAddColsParams addColParams = params.getAdd_cols_params();
@@ -5256,8 +5250,8 @@ public class CatalogOpExecutor {
   }
 
   /**
-   * Tries to take a write lock a table in the catalog. Throw an InternalException if
-   * the catalog is unable to lock the given table.
+   * Tries to take the write lock of the table in the catalog. Throws an InternalException
+   * if the catalog is unable to lock the given table.
    */
   private void tryWriteLock(Table tbl) throws InternalException {
     tryWriteLock(tbl, "altering");
