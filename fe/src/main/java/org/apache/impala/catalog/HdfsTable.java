@@ -295,7 +295,7 @@ public class HdfsTable extends Table implements FeFsTable {
   // in coordinator's cache if there are no updates on them.
   private final Set<HdfsPartition> droppedPartitions_ = new HashSet<>();
 
-  // pendingVersionNumber indicates a version number allocated to this Hdfs for a
+  // pendingVersionNumber indicates a version number allocated to this HdfsTable for a
   // ongoing alter table operation. Typically, such operations are long running and
   // hold the table lock for a long time. This version is used to finally "commit"
   // the change as used to actually set the catalog version. The topic-update
@@ -2675,19 +2675,13 @@ public class HdfsTable extends Table implements FeFsTable {
     }
   }
 
-  public long getCurrentPendingVersion() {
-    synchronized (pendingVersionLock_) {
-      return pendingVersionNumber_;
-    }
-  }
-
   /**
    * Sets the version of this table. This makes sure that if there is a
    * pendingVersionNumber which is higher than the given version, it uses the
    * pendingVersionNumber. A pendingVersionNumber which is higher than given version
    * represents that the topic update thread tried to add this table to a update but
    * couldn't. Hence it needs the ongoing update operation (represented by the given
-   * version) to use a higher version number so that this table falls within then next
+   * version) to use a higher version number so that this table falls within the next
    * topic update.
    */
   @Override
