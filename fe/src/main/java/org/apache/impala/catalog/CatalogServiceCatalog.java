@@ -1368,6 +1368,7 @@ public class CatalogServiceCatalog extends Catalog {
    */
   private void lockTableAndAddToCatalogDelta(final long tblVersion, Table tbl,
       GetCatalogDeltaContext ctx, boolean lockWithTimeout) throws TException {
+    Stopwatch sw = Stopwatch.createStarted();
     if (tbl instanceof HdfsTable && lockWithTimeout) {
       if (!lockHdfsTblWithTimeout(tblVersion, (HdfsTable) tbl, ctx)) return;
     } else {
@@ -1375,6 +1376,8 @@ public class CatalogServiceCatalog extends Catalog {
       // We block until table read lock is acquired.
       tbl.takeReadLock();
     }
+    LOG.debug("Time taken to acquire read lock on table {} for topic update {} ms",
+        tbl.getFullName(), sw.stop().elapsed(TimeUnit.MILLISECONDS));
     try {
       addTableToCatalogDeltaHelper(tbl, ctx);
     } finally {

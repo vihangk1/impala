@@ -15,8 +15,10 @@ import pytest
 import time
 
 from tests.common.impala_test_suite import ImpalaTestSuite
+from tests.common.skip import SkipIfS3
 
 
+@SkipIfS3.variable_listing_times
 class TestTopicUpdateFrequency(ImpalaTestSuite):
 
   @pytest.mark.execute_serially
@@ -60,101 +62,40 @@ class TestTopicUpdateFrequency(ImpalaTestSuite):
 
     for blocking_query in blocking_queries:
       print("Running blocking query: {0}".format(blocking_query))
+      # blocking query is sync_ddl
+      blocking_query_options["sync_ddl"] = "false"
       self.__run_topic_update_test(blocking_query,
         non_blocking_queries, init_queries, blocking_query_options=blocking_query_options)
-      # run the blocking and non-blocking queries on same coordinator
-      self.__run_topic_update_test(blocking_query,
-        non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
-        non_blocking_impalad=0)
       # blocking query is sync_ddl
       blocking_query_options["sync_ddl"] = "true"
       self.__run_topic_update_test(blocking_query,
         non_blocking_queries, init_queries, blocking_query_options=blocking_query_options)
-      self.__run_topic_update_test(blocking_query,
-        non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
-        non_blocking_impalad=0)
-      # non_blocking queries are also sync_ddl
       non_blocking_query_options = {
         "sync_ddl": "true",
       }
       self.__run_topic_update_test(blocking_query,
         non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
         non_blocking_query_options=non_blocking_query_options)
-      # run the blocking and non-blocking queries on same coordinator
-      self.__run_topic_update_test(blocking_query,
-        non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
-        non_blocking_query_options=non_blocking_query_options, non_blocking_impalad=0)
-      # non-blocking queries are sync_ddl but blocking ones are not
       blocking_query_options["sync_ddl"] = "false"
       self.__run_topic_update_test(blocking_query,
         non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
         non_blocking_query_options=non_blocking_query_options)
-      # run the blocking and non-blocking queries on same coordinator
-      self.__run_topic_update_test(blocking_query,
-        non_blocking_queries, init_queries, blocking_query_options=blocking_query_options,
-        non_blocking_query_options=non_blocking_query_options, non_blocking_impalad=0)
-
-  @pytest.mark.execute_serially
-  def test_topic_updates_advance(self):
-    """Test make sure that a if long running blocking queries are run continuously
-    topic-update thread is not starved and it eventually blocks until it acquires a table
-    lock."""
-    # Each of these queries take complete between 30-1min with the debug action delays
-    # below.
-    blocking_queries = [
-      "refresh tpcds.store_sales",
-      "alter table tpcds.store_sales recover partitions",
-      "compute stats tpcds.store_sales"
-    ]
-    debug_action = "catalogd_refresh_hdfs_listing_delay:SLEEP@50|catalogd_table_recover_delay:SLEEP@10000|catalogd_update_stats_delay:SLEEP@5000"
-    blocking_query_options = {
-      "debug_action": debug_action,
-      "sync_ddl": "false"
-    }
-    self.__run_loop_test(blocking_queries, blocking_query_options, 120000)
-    # loop in sync_ddl mode
-    blocking_query_options["sync_ddl"] = "true"
-    self.__run_loop_test(blocking_queries, blocking_query_options, 120000)
-
-  def __run_loop_test(self, blocking_queries, blocking_query_options, timeout):
-    """Runs the given list of queries with given query options in a loop
-    and makes sure that they complete without any errors."""
-    slow_query_pool = ThreadPool(processes=len(blocking_queries))
-    # run the slow query on the impalad-0 with the given query options
-    slow_query_futures = {}
-    for q in blocking_queries:
-      print("Running blocking query {0}".format(q))
-      slow_query_futures[q] = slow_query_pool.apply_async(self.loop_exec,
-        args=(q, blocking_query_options))
-
-    for q in slow_query_futures:
-      # make sure that queries complete eventually.
-      durations = slow_query_futures[q].get()
-      for i in range(len(durations)):
-        assert durations[i] < timeout, "Query {0} iteration {1} did " \
-                                       "not complete within {2}.".format(q, i, timeout)
-
-  def loop_exec(self, query, query_options, iterations=10, impalad=0):
-    durations = []
-    for iter in range(iterations):
-      durations.append(self.exec_and_time(query, query_options, impalad))
-    return durations
 
   def __run_topic_update_test(self, slow_blocking_query, fast_queries,
       init_queries, blocking_query_options,
       non_blocking_query_options=None, blocking_query_timeout=10000,
-      fast_query_timeout_ms=6000, non_blocking_impalad=1,
+      fast_query_timeout_ms=6000, non_blocking_impalad=0,
       expect_topic_updates_to_block=False):
     """This function runs the slow query in a Impala client and then creates separate
-    Impala clients to run the other_queries. It makes sure that the
-    other_queries don't get blocked by the slow query by making sure that
-    other_queries return back before the blocking query within a given expected
+    Impala clients to run the fast_queries. It makes sure that the
+    fast_queries don't get blocked by the slow query by making sure that
+    fast_queries return back before the blocking query within a given expected
     timeout."""
     assert fast_query_timeout_ms < blocking_query_timeout
     # run the init queries first in sync_ddl mode so that all the impalads are starting
     # with a clean state.
     for q in init_queries:
-      self.execute_query(q, query_options={"sync_ddl": "true"})
+      self.execute_query(q)
 
     pool = ThreadPool(processes=len(fast_queries))
     slow_query_pool = ThreadPool(processes=len(slow_blocking_query))
@@ -187,3 +128,49 @@ class TestTopicUpdateFrequency(ImpalaTestSuite):
     assert slow_query_future.get() > blocking_query_timeout, \
       "{0} query took less time than {1} msec".format(slow_blocking_query,
         blocking_query_timeout)
+
+  @pytest.mark.execute_serially
+  def test_topic_updates_advance(self):
+    """Test make sure that a if long running blocking queries are run continuously
+    topic-update thread is not starved and it eventually blocks until it acquires a table
+    lock."""
+    # Each of these queries take complete between 30-1min with the debug action delays
+    # below.
+    blocking_queries = [
+      "refresh tpcds.store_sales",
+      "alter table tpcds.store_sales recover partitions",
+      "compute stats functional.alltypes"
+    ]
+    debug_action = "catalogd_refresh_hdfs_listing_delay:SLEEP@30|catalogd_table_recover_delay:SLEEP@10000|catalogd_update_stats_delay:SLEEP@10000"
+    blocking_query_options = {
+      "debug_action": debug_action,
+      "sync_ddl": "false"
+    }
+    self.__run_loop_test(blocking_queries, blocking_query_options, 60000)
+    # loop in sync_ddl mode
+    blocking_query_options["sync_ddl"] = "true"
+    self.__run_loop_test(blocking_queries, blocking_query_options, 60000)
+
+  def __run_loop_test(self, blocking_queries, blocking_query_options, timeout):
+    """Runs the given list of queries with given query options in a loop
+    and makes sure that they complete without any errors."""
+    slow_query_pool = ThreadPool(processes=len(blocking_queries))
+    # run the slow query on the impalad-0 with the given query options
+    slow_query_futures = {}
+    for q in blocking_queries:
+      print("Running blocking query {0}".format(q))
+      slow_query_futures[q] = slow_query_pool.apply_async(self.loop_exec,
+        args=(q, blocking_query_options))
+
+    for q in slow_query_futures:
+      # make sure that queries complete eventually.
+      durations = slow_query_futures[q].get()
+      for i in range(len(durations)):
+        assert durations[i] < timeout, "Query {0} iteration {1} did " \
+                                       "not complete within {2}.".format(q, i, timeout)
+
+  def loop_exec(self, query, query_options, iterations=10, impalad=0):
+    durations = []
+    for iter in range(iterations):
+      durations.append(self.exec_and_time(query, query_options, impalad))
+    return durations
