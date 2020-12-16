@@ -326,7 +326,7 @@ public class CatalogServiceCatalog extends Catalog {
         "catalog_max_lock_skipped_topic_updates must be positive");
     topicUpdateTblLockMaxWaitTimeMs = BackendConfig.INSTANCE
         .getBackendCfg().topic_update_tbl_max_wait_time_ms;
-    Preconditions.checkState(topicUpdateTblLockMaxWaitTimeMs > 0,
+    Preconditions.checkState(topicUpdateTblLockMaxWaitTimeMs >= 0,
         "topic_update_tbl_max_wait_time_ms must be positive");
     catalogServiceId_ = catalogServiceId;
     tableLoadingMgr_ = new TableLoadingMgr(this, numLoadingThreads);
@@ -1318,7 +1318,10 @@ public class CatalogServiceCatalog extends Catalog {
       // if we have already skipped this table due to lock contention
       // maxSkippedUpdatesLockContention number of times, we must block until we add it
       // to the topic updates. Otherwise, we can attempt to take a lock with a timeout.
-      boolean lockWithTimeout = topicUpdateEntry.getNumSkippedUpdatesLockContention()
+      // if the topicUpdateTblLockMaxWaitTimeMs is set to 0, it means the lock timeout
+      // is disabled and we should just block here until lock is acquired.
+      boolean lockWithTimeout = topicUpdateTblLockMaxWaitTimeMs > 0
+          && topicUpdateEntry.getNumSkippedUpdatesLockContention()
           < maxSkippedUpdatesLockContention;
       if (!lockWithTimeout) {
         LOG.warn("Topic update thread blocking until lock is acquired for table {}",
@@ -1376,8 +1379,11 @@ public class CatalogServiceCatalog extends Catalog {
       // We block until table read lock is acquired.
       tbl.takeReadLock();
     }
-    LOG.debug("Time taken to acquire read lock on table {} for topic update {} ms",
-        tbl.getFullName(), sw.stop().elapsed(TimeUnit.MILLISECONDS));
+    long elapsedTime = sw.stop().elapsed(TimeUnit.MILLISECONDS);
+    if (elapsedTime > 2000) {
+      LOG.debug("Time taken to acquire read lock on table {} for topic update {} ms",
+          tbl.getFullName(), elapsedTime);
+    }
     try {
       addTableToCatalogDeltaHelper(tbl, ctx);
     } finally {
@@ -1438,9 +1444,9 @@ public class CatalogServiceCatalog extends Catalog {
     TopicUpdateLog.Entry topicUpdateEntry = topicUpdateLog_
         .getOrCreateLogEntry(hdfsTable.getUniqueName());
     LOG.info(
-        "Table {} (version={}) is skipping topic update ({}, {}] "
+        "Table {} (version={}, lastSeen={}) is skipping topic update ({}, {}] "
             + "due to lock contention", hdfsTable.getFullName(), tblVersion,
-        ctx.fromVersion, ctx.toVersion);
+        hdfsTable.getLastVersionSeenByTopicUpdate(), ctx.fromVersion, ctx.toVersion);
     if (hdfsTable.getLastVersionSeenByTopicUpdate() != tblVersion) {
       // if the last version skipped by topic update is not same as the last version
       // sent, it means the table was updated and topic update thread is lagging

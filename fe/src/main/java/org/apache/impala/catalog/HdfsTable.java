@@ -947,7 +947,7 @@ public class HdfsTable extends Table implements FeFsTable {
     Preconditions.checkState(partitionMap_.get(partBuilder.getOldId()) == oldPartition,
         "Concurrent modification on partitions: old instance changed");
     boolean partitionNotChanged = partBuilder.equalsToOriginal(oldPartition);
-    LOG.trace("Partition {} {}", oldPartition.getName(),
+    LOG.trace("Partition {} {}", oldPartition.getPartitionName(),
         partitionNotChanged ? "changed" : "unchanged");
     if (partitionNotChanged) return;
     HdfsPartition newPartition = partBuilder.build();
