@@ -50,12 +50,19 @@ public class IncompleteTable extends Table implements FeIncompleteTable {
   // then this is assumed to be an uninitialized table (table that does not have
   // its metadata loaded).
   private ImpalaException cause_;
+  private long id_;
 
-  private IncompleteTable(Db db, String name,
-      ImpalaException cause) {
+  private IncompleteTable(Db db, String name, ImpalaException cause) {
+    this(db, name, -1, cause);
+  }
+
+  private IncompleteTable(Db db, String name, long id, ImpalaException cause) {
     super(null, db, name, null);
     cause_ = cause;
+    id_ = id;
   }
+
+  public long getId() { return id_; }
 
   /**
    * Returns the cause (ImpalaException) which led to this table's metadata being
@@ -129,6 +136,10 @@ public class IncompleteTable extends Table implements FeIncompleteTable {
           stackTrace.toArray(new StackTraceElement[stackTrace.size()]));
       this.cause_ = loadingException;
     }
+  }
+
+  public static IncompleteTable createUninitializedTable(Db db, String name, long id) {
+    return new IncompleteTable(db, name, id, null);
   }
 
   public static IncompleteTable createUninitializedTable(Db db, String name) {

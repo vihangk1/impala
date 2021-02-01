@@ -18,6 +18,7 @@
 package org.apache.impala.catalog.events;
 
 import org.apache.impala.catalog.events.MetastoreEventsProcessor.EventProcessorStatus;
+import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
 
@@ -85,5 +86,10 @@ public class NoOpEventProcessor implements ExternalEventsProcessor {
   @Override
   public TEventProcessorMetricsSummaryResponse getEventProcessorSummary() {
     return DEFAULT_SUMMARY_RESPONSE;
+  }
+
+  @Override
+  public void setCatalogOpExecutor(CatalogOpExecutor catalogOpExecutor) {
+    // no-op
   }
 }

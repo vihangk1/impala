@@ -32,6 +32,7 @@ IMPALA_REMOTE_URL = os.environ.get("IMPALA_REMOTE_URL", "")
 
 # Default web UI URL for local test cluster
 DEFAULT_LOCAL_WEB_UI_URL = "http://localhost:25000"
+DEFAULT_CATALOG_WEB_UI_URL = "http://localhost:25020"
 
 # Find the local build version. May be None if Impala wasn't built locally.
 IMPALA_LOCAL_BUILD_VERSION = None
@@ -224,11 +225,14 @@ class ImpalaTestClusterProperties(object):
   Acquires and provides characteristics about the way the Impala under test was compiled
   and its likely effects on its responsiveness to automated test timings.
   """
-  def __init__(self, build_flavor, library_link_type, web_ui_url):
+  def __init__(self, build_flavor, library_link_type, web_ui_url, catalog_web_ui_url):
     self._build_flavor = build_flavor
     self._library_link_type = library_link_type
     self._web_ui_url = web_ui_url
-    self._runtime_flags = None  # Lazily populated to avoid unnecessary web UI calls.
+    self._catalog_web_ui_url = catalog_web_ui_url
+    # Lazily populated to avoid unnecessary web UI calls.
+    self._runtime_flags = None
+    self._catalog_runtime_flags = None
 
   @classmethod
   def get_instance(cls):
@@ -247,7 +251,9 @@ class ImpalaTestClusterProperties(object):
     else:
       build_flavor, link_type =\
           ImpalaTestClusterFlagsDetector.detect_using_build_root_or_web_ui(IMPALA_HOME)
-    cls._instance = ImpalaTestClusterProperties(build_flavor, link_type, web_ui_url)
+    # TODO do we need to have logic above for catalog web ui too?
+    cls._instance = ImpalaTestClusterProperties(build_flavor, link_type, web_ui_url,
+                                                DEFAULT_CATALOG_WEB_UI_URL)
     return cls._instance
 
   @property
@@ -334,14 +340,33 @@ class ImpalaTestClusterProperties(object):
     """Return the command line flags from the impala web UI. Returns a Python map with
     the flag name as the key and a dictionary of flag properties as the value."""
     if self._runtime_flags is None:
-      response = requests.get(self._web_ui_url + "/varz?json")
-      assert response.status_code == requests.codes.ok,\
-              "Offending url: " + impala_url
-      assert "application/json" in response.headers['Content-Type']
-      self._runtime_flags = {}
-      for flag_dict in json.loads(response.text)["flags"]:
-        self._runtime_flags[flag_dict["name"]] = flag_dict
+      self._runtime_flags = \
+          ImpalaTestClusterProperties.__get_flag_from_webui(self, self._web_ui_url)
     return self._runtime_flags
+
+  @property
+  def catalog_runtime_flags(self):
+    """Return the command line flags from the catalog web UI. Returns a Python map with
+    the flag name as the key and a dictionary of flag properties as the value."""
+    assert self._catalog_web_ui_url is not None
+    if self._catalog_runtime_flags is None:
+      self._catalog_runtime_flags = \
+          ImpalaTestClusterProperties.__get_flag_from_webui(self,
+          self._catalog_web_ui_url)
+    return self._catalog_runtime_flags
+
+  @staticmethod
+  def __get_flag_from_webui(self, web_ui_url):
+    """Return the command line flags from the given web UI. Returns a Python map with
+    the flag name as the key and a dictionary of flag properties as the value."""
+    response = requests.get(web_ui_url + "/varz?json")
+    assert response.status_code == requests.codes.ok,\
+            "Offending url: " + web_ui_url
+    assert "application/json" in response.headers['Content-Type']
+    flags = {}
+    for flag_dict in json.loads(response.text)["flags"]:
+      flags[flag_dict["name"]] = flag_dict
+    return flags
 
   def is_catalog_v2_cluster(self):
     """Checks whether we use local catalog."""
@@ -356,13 +381,22 @@ class ImpalaTestClusterProperties(object):
         return False
       raise
 
+  def get_catalog_web_ui(self):
+    return self._catalog_web_ui_url
+
+  def get_catalog_runtime_flags(self):
+    return self.catalog_runtime_flags
+
+  def is_key_present(self, key="hms_event_polling_interval_s"):
+    return key in self.catalog_runtime_flags
+
   def is_event_polling_enabled(self):
     """Whether we use HMS notifications to automatically refresh catalog service.
     Checks if --hms_event_polling_interval_s is set to non-zero value"""
     try:
       key = "hms_event_polling_interval_s"
-      # --use_local_catalog is hidden so does not appear in JSON if disabled.
-      return key in self.runtime_flags and int(self.runtime_flags[key]["current"]) > 0
+      return key in self.catalog_runtime_flags and \
+          int(self.catalog_runtime_flags[key]["current"]) > 0
     except Exception:
       if self.is_remote_cluster():
         # IMPALA-8553: be more tolerant of failures on remote cluster builds.
