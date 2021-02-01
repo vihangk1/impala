@@ -242,6 +242,9 @@ class SkipIfHive3:
              "dependencies of Hive 3, see IMPALA-9287.")
   non_acid = pytest.mark.skipif(HIVE_MAJOR_VERSION >= 3,
       reason="This test expects tables in non-AICD format.")
+  managed_location = pytest.mark.skipif(HIVE_MAJOR_VERSION >= 3,
+      reason="Managed location is not present in the events. See HIVE-24899. This may"
+             " be fixed once we have HIVE-24175.")
 
 
 class SkipIfHive2:
@@ -300,6 +303,12 @@ class SkipIfCatalogV2:
       IMPALA_TEST_CLUSTER_PROPERTIES.is_catalog_v2_cluster(),
       reason="Table isn't invalidated with Local catalog and enabled hms_event_polling.")
 
+  @classmethod
+  def partition_level_refresh_due_to_events(self):
+    return pytest.mark.skipif(
+      IMPALA_TEST_CLUSTER_PROPERTIES.is_event_polling_enabled(),
+      reason="Partitions of external tables are automatically refreshed"
+             " due to the events.")
 
 class SkipIfOS:
   redhat6 = pytest.mark.skipif(IS_REDHAT_6_DERIVATIVE,

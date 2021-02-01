@@ -37,6 +37,7 @@ from tests.common.test_dimensions import (
     create_single_exec_option_dimension,
     create_uncompressed_text_dimension)
 from tests.util.hive_utils import HiveDbWrapper, HiveTableWrapper
+from tests.util.event_processor_utils import EventProcessorUtils
 
 
 @SkipIfS3.hive
@@ -66,8 +67,15 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.run_stmt_in_hive("drop database if exists hms_sanity_db cascade")
     self.run_stmt_in_hive("create database hms_sanity_db")
     # Make sure Impala's metadata is in sync.
-    # Invalidate metadata to pick up hive-created db.
-    self.client.execute("invalidate metadata")
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      # Using HMS event processor - wait until latest event is processed
+      EventProcessorUtils.wait_for_event_processing(self)
+      self.confirm_db_exists("hms_sanity_db")
+      # assert 'hms_sanity_db' in self.client.execute("show databases").data
+    else:
+      # Using traditional catalog - need to invalidate to pick up hive-created db.
+      self.client.execute("invalidate metadata")
     # Creating a database with the same name using 'IF NOT EXISTS' in Impala should
     # not fail
     self.client.execute("create database if not exists hms_sanity_db")
@@ -85,7 +93,12 @@ class TestHmsIntegrationSanity(ImpalaTestSuite):
     self.client.execute("create table if not exists hms_sanity_db.test_tbl (a int)")
     # The table should not appear in the catalog *immediately* unless invalidate
     # metadata is executed.
-    assert 'test_tbl' not in self.client.execute("show tables in hms_sanity_db").data
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      EventProcessorUtils.wait_for_event_processing(self)
+      assert 'test_tbl' in self.client.execute("show tables in hms_sanity_db").data
+    else:
+      assert 'test_tbl' not in self.client.execute("show tables in hms_sanity_db").data
     self.client.execute("invalidate metadata hms_sanity_db.test_tbl")
     assert 'test_tbl' in self.client.execute("show tables in hms_sanity_db").data
 
@@ -635,7 +648,7 @@ class TestHmsIntegration(ImpalaTestSuite):
             'select * from %s' % table_name).get_data()
 
   @pytest.mark.execute_serially
-  def test_add_column(self, vector):
+  def test_add_column(self, vector, cluster_properties):
     """Columns added in one engine are visible in the other via DESCRIBE."""
     with self.ImpalaDbWrapper(self, self.unique_string()) as db_name:
       with self.ImpalaTableWrapper(self, db_name + '.' + self.unique_string(),
@@ -651,13 +664,18 @@ class TestHmsIntegration(ImpalaTestSuite):
         self.run_stmt_in_hive(
             'alter table %s add columns (z int)' %
             table_name)
-        self.client.execute('invalidate metadata %s' % table_name)
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata %s' % table_name)
         expected['z'] = int_column
         assert expected == self.hive_columns(table_name)
         assert expected == self.impala_columns(table_name)
 
   @pytest.mark.execute_serially
-  def test_drop_database(self, vector):
+  def test_drop_database(self, vector, cluster_properties):
     """
     If a DB is created, then dropped, in Hive, Impala can create one with the
     same name without invalidating metadata.
@@ -666,6 +684,10 @@ class TestHmsIntegration(ImpalaTestSuite):
     test_db = self.unique_string()
     with HiveDbWrapper(self, test_db) as db_name:
       pass
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      # Using HMS event processor - wait until latest event is processed
+      EventProcessorUtils.wait_for_event_processing(self)
     self.assert_sql_error(
         self.client.execute,
         'create table %s.%s (x int)' %
@@ -677,7 +699,7 @@ class TestHmsIntegration(ImpalaTestSuite):
       pass
 
   @pytest.mark.execute_serially
-  def test_table_format_change(self, vector):
+  def test_table_format_change(self, vector, cluster_properties):
     """
     Hive storage format changes propagate to Impala.
     """
@@ -688,15 +710,19 @@ class TestHmsIntegration(ImpalaTestSuite):
                             '(x int, y int) stored as parquet') as table_name:
         self.client.execute('invalidate metadata')
         self.client.execute('invalidate metadata %s' % table_name)
-        print self.impala_table_stats(table_name)
         assert 'PARQUET' == self.impala_table_stats(table_name)[()]['format']
         self.run_stmt_in_hive(
             'alter table %s set fileformat avro' % table_name)
-        self.client.execute('invalidate metadata %s' % table_name)
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata %s' % table_name)
         assert 'AVRO' == self.impala_table_stats(table_name)[()]['format']
 
   @pytest.mark.execute_serially
-  def test_change_column_type(self, vector):
+  def test_change_column_type(self, vector, cluster_properties):
     """Hive column type changes propagate to Impala."""
 
     with HiveDbWrapper(self, self.unique_string()) as db_name:
@@ -707,13 +733,18 @@ class TestHmsIntegration(ImpalaTestSuite):
         self.run_stmt_in_hive('alter table %s change y y string' % table_name)
         assert '33,44' == self.run_stmt_in_hive(
             'select * from %s' % table_name).split('\n')[1]
-        self.client.execute('invalidate metadata %s' % table_name)
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata %s' % table_name)
         assert '33\t44' == self.client.execute(
             'select * from %s' % table_name).get_data()
         assert 'string' == self.impala_columns(table_name)['y']['type']
 
   @pytest.mark.execute_serially
-  def test_change_parquet_column_type(self, vector):
+  def test_change_parquet_column_type(self, vector, cluster_properties):
     """
     Changing column types in Parquet doesn't always work in Hive and it causes
     'select *' to fail in Impala as well, after invalidating metadata. This is a
@@ -727,7 +758,12 @@ class TestHmsIntegration(ImpalaTestSuite):
         self.run_stmt_in_hive('insert into table %s values (33,44)' % table_name)
         assert '33,44' == self.run_stmt_in_hive(
             'select * from %s' % table_name).split('\n')[1]
-        self.client.execute('invalidate metadata')
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata')
         assert '33\t44' == self.client.execute(
             'select * from %s' % table_name).get_data()
         # Modify table metadata. After this statement, the table metadata in HMS
@@ -742,7 +778,12 @@ class TestHmsIntegration(ImpalaTestSuite):
           # Hive 3 implicitly converts INTs to STRINGs.
           assert '33,44' == self.run_stmt_in_hive(
               'select * from %s' % table_name).split('\n')[1]
-        self.client.execute('invalidate metadata %s' % table_name)
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata %s' % table_name)
         # Impala doesn't convert INTs to STRINGs implicitly.
         self.assert_sql_error(
             self.client.execute, 'select * from %s' % table_name,
@@ -757,7 +798,12 @@ class TestHmsIntegration(ImpalaTestSuite):
             self.run_stmt_in_hive, 'select * from %s' % table_name,
             'org.apache.hadoop.io.Text cannot be '
             'cast to org.apache.hadoop.io.IntWritable')
-        self.client.execute('invalidate metadata %s' % table_name)
+        if cluster_properties.is_event_polling_enabled():
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          self.client.execute('invalidate metadata %s' % table_name)
         self.assert_sql_error(
             self.client.execute, 'select * from %s' % table_name,
             "Column type: INT, Parquet schema:")
@@ -867,9 +913,9 @@ class TestHmsIntegration(ImpalaTestSuite):
   def test_change_table_name(self, vector):
     """
     Changing the table name in Hive propagates to Impala after 'invalidate
-    metadata'.
+    metadata'. Not using events in this test since we are specifically testing
+    'invalidate metadata' behavior.
     """
-
     with HiveDbWrapper(self, self.unique_string()) as db_name:
       with HiveTableWrapper(self, db_name + '.' + self.unique_string(),
                             '(x int, y int)') as table_name:
@@ -902,7 +948,14 @@ class TestHmsIntegration(ImpalaTestSuite):
         # Add partition in Hive.
         self.run_stmt_in_hive("alter table %s add partition (x=2)" % table_name)
         # Impala is not aware of the new partition.
-        assert [] == self.get_impala_partition_info(table_name, 'x')
+        if cluster_properties.is_event_polling_enabled():
+          # TODO(Vihang): It might be better to move this test to a custom-cluster
+          # test since waiting on events defeats the purpose of this test.
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          assert [] == self.get_impala_partition_info(table_name, 'x')
 
         # Try to add partitions with caching in Impala, one of them (x=2) exists in HMS.
         self.assert_sql_error(self.client.execute,
@@ -941,7 +994,7 @@ class TestHmsIntegration(ImpalaTestSuite):
         assert x1_location.endswith("/x=1");
 
   @pytest.mark.execute_serially
-  def test_add_preexisting_partitions_with_data(self, vector):
+  def test_add_preexisting_partitions_with_data(self, vector, cluster_properties):
     """
     IMPALA-1670, IMPALA-4141: After addding partitions that already exist in HMS, Impala
     can access the partition data.
@@ -964,8 +1017,15 @@ class TestHmsIntegration(ImpalaTestSuite):
             % table_name)
         self.run_stmt_in_hive("insert into %s partition(x=3) values (1)"
             % table_name)
-        # No partitions exist yet in Impala.
-        assert [] == self.get_impala_partition_info(table_name, 'x')
+        if cluster_properties.is_event_polling_enabled():
+          # TODO(Vihang): It might be better to move this test to a custom-cluster
+          # test since waiting on events defeats the purpose of this test.
+          assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          # No partitions exist yet in Impala.
+          assert [] == self.get_impala_partition_info(table_name, 'x')
 
         # Add the same partitions in Impala with IF NOT EXISTS.
         self.client.execute("alter table %s add if not exists partition (x=1) "\

@@ -137,6 +137,8 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   // impalad.
   protected long lastUsedTime_;
 
+  protected long createEventId_ = -1;
+
   // tracks the in-flight metastore events for this table. Used by Events processor to
   // avoid unnecessary refresh when the event is received
   private final InFlightEvents inFlightEvents = new InFlightEvents();
@@ -163,6 +165,8 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
   public static final String LOAD_DURATION_ALL_COLUMN_STATS =
       "load-duration.all-column-stats";
 
+  public static final String NUMBER_OF_INFLIGHT_EVENTS = "num-inflight-events";
+
   // Table property key for storing the time of the last DDL operation.
   public static final String TBL_PROP_LAST_DDL_TIME = "transient_lastDdlTime";
 
@@ -187,6 +191,11 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     initMetrics();
   }
 
+  public long getCreateEventId() { return createEventId_; }
+
+  public void setCreateEventId(long eventId) {
+    this.createEventId_ = eventId;
+  }
   /**
    * Returns if the given HMS table is an external table (uses table type if
    * available or else uses table properties). Implementation is based on org.apache
@@ -324,6 +333,7 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     metrics_.addTimer(LOAD_DURATION_STORAGE_METADATA);
     metrics_.addTimer(HMS_LOAD_TBL_SCHEMA);
     metrics_.addTimer(LOAD_DURATION_ALL_COLUMN_STATS);
+    metrics_.addCounter(NUMBER_OF_INFLIGHT_EVENTS);
   }
 
   public Metrics getMetrics() { return metrics_; }
@@ -868,7 +878,11 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
     Preconditions.checkState(isWriteLockedByCurrentThread(),
         "removeFromVersionsForInFlightEvents called without taking the table lock on "
             + getFullName());
-    return inFlightEvents.remove(isInsertEvent, versionNumber);
+    boolean removed = inFlightEvents.remove(isInsertEvent, versionNumber);
+    if (removed) {
+      metrics_.getCounter(NUMBER_OF_INFLIGHT_EVENTS).dec();
+    }
+    return removed;
   }
 
   /**
@@ -892,6 +906,8 @@ public abstract class Table extends CatalogObjectImpl implements FeTable {
       LOG.warn(String.format("Could not add %s version to the table %s. This could "
           + "cause unnecessary refresh of the table when the event is received by the "
               + "Events processor.", versionNumber, getFullName()));
+    } else {
+      metrics_.getCounter(NUMBER_OF_INFLIGHT_EVENTS).inc();
     }
   }
 

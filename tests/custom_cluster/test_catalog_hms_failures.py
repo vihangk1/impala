@@ -86,10 +86,11 @@ class TestHiveMetaStoreFailure(CustomClusterTestSuite):
   @pytest.mark.execute_serially
   @CustomClusterTestSuite.with_args(
     impalad_args='--use_local_catalog --catalog_topic_mode=minimal',
-    catalogd_args='--catalog_topic_mode=minimal')
+    catalogd_args='--catalog_topic_mode=minimal --hms_event_polling_interval_s=0')
   def test_hms_client_retries(self):
     """Test that a running query will trigger the retry logic in
-    RetryingMetaStoreClient."""
+    RetryingMetaStoreClient. We disable event polling since it makes the test
+    non-determistic. The error message count cannot be determined."""
     # Force the tables to be uncached and then kill the hive metastore.
     tbl_name = "functional.alltypes"
     self.client.execute("invalidate metadata %s" % tbl_name)

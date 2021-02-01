@@ -51,8 +51,7 @@ public class IncompleteTable extends Table implements FeIncompleteTable {
   // its metadata loaded).
   private ImpalaException cause_;
 
-  private IncompleteTable(Db db, String name,
-      ImpalaException cause) {
+  private IncompleteTable(Db db, String name, ImpalaException cause) {
     super(null, db, name, null);
     cause_ = cause;
   }
