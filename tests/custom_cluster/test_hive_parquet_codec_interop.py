@@ -25,6 +25,7 @@ from tests.common.skip import SkipIfS3
 from tests.common.test_dimensions import create_exec_option_dimension
 from tests.common.test_result_verifier import verify_query_result_is_equal
 from tests.util.filesystem_utils import get_fs_path
+from tests.util.event_processor_utils import EventProcessorUtils
 
 PARQUET_CODECS = ['none', 'snappy', 'gzip', 'zstd', 'zstd:7', 'lz4']
 
@@ -95,8 +96,10 @@ class TestParquetInterop(CustomClusterTestSuite):
           .format(codec, external, hive_table, tblproperties, impala_table))
 
       # Make sure Impala's metadata is in sync.
-      if cluster_properties.is_catalog_v2_cluster():
-        self.wait_for_table_to_appear(unique_database, hive_table, timeout_s=10)
+      if cluster_properties.is_event_polling_enabled():
+        assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+        EventProcessorUtils.wait_for_event_processing(self)
+        self.confirm_table_exists(unique_database, hive_table)
       else:
         self.client.execute("invalidate metadata {0}".format(hive_table))
 

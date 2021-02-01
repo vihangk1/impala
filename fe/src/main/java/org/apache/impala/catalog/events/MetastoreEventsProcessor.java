@@ -44,6 +44,7 @@ import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEvent;
 import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventFactory;
 import org.apache.impala.common.Metrics;
 import org.apache.impala.compat.MetastoreShim;
+import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
 import org.apache.impala.util.MetaStoreUtil;
@@ -246,13 +247,13 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   private final Metrics metrics_ = new Metrics();
 
   @VisibleForTesting
-  MetastoreEventsProcessor(CatalogServiceCatalog catalog, long startSyncFromId,
+  MetastoreEventsProcessor(CatalogOpExecutor catalogOpExecutor, long startSyncFromId,
       long pollingFrequencyInSec) throws CatalogException {
     Preconditions.checkState(pollingFrequencyInSec > 0);
-    this.catalog_ = Preconditions.checkNotNull(catalog);
+    this.catalog_ = Preconditions.checkNotNull(catalogOpExecutor.getCatalog());
     validateConfigs();
     lastSyncedEventId_.set(startSyncFromId);
-    metastoreEventFactory_ = new MetastoreEventFactory(catalog_, metrics_);
+    metastoreEventFactory_ = new MetastoreEventFactory(catalogOpExecutor, metrics_);
     pollingFrequencyInSec_ = pollingFrequencyInSec;
     initMetrics();
   }
@@ -578,6 +579,10 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     return summaryResponse;
   }
 
+  @Override
+  public void setCatalogOpExecutor(CatalogOpExecutor catalogOpExecutor) {
+  }
+
   @VisibleForTesting
   Metrics getMetrics() {
     return metrics_;
@@ -654,8 +659,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
    * a singleton and should only be created during catalogD initialization time, so that
    * the start syncId matches with the catalogD startup time.
    *
-   * @param catalog the CatalogServiceCatalog instance to which this event processing
-   *     belongs
+   * @param catalogOpExecutor the CatalogOpExecutor instance to which this event
+   *     processor belongs.
    * @param startSyncFromId Start event id. Events will be polled starting from this
    *     event id
    * @param eventPollingInterval HMS polling interval in seconds
@@ -663,14 +668,14 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
    *     instantiated
    */
   public static synchronized ExternalEventsProcessor getInstance(
-      CatalogServiceCatalog catalog, long startSyncFromId, long eventPollingInterval)
+      CatalogOpExecutor catalogOpExecutor, long startSyncFromId, long eventPollingInterval)
       throws CatalogException {
     if (instance != null) {
       return instance;
     }
 
     instance =
-        new MetastoreEventsProcessor(catalog, startSyncFromId, eventPollingInterval);
+        new MetastoreEventsProcessor(catalogOpExecutor, startSyncFromId, eventPollingInterval);
     return instance;
   }
 
