@@ -18,6 +18,7 @@
 package org.apache.impala.catalog.events;
 
 import org.apache.impala.catalog.CatalogException;
+import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
 
@@ -71,4 +72,10 @@ public interface ExternalEventsProcessor {
    * content of a dedicated page for the event processor
    */
   TEventProcessorMetricsSummaryResponse getEventProcessorSummary();
+
+  /**
+   * Sets the catalogOpExecutor in the events processor which is used for processing
+   * create/drop events at table and database level.
+   */
+  void setCatalogOpExecutor(CatalogOpExecutor catalogOpExecutor);
 }

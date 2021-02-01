@@ -17,7 +17,7 @@
 
 from test_ddl_base import TestDdlBase
 from tests.common.skip import (SkipIfS3, SkipIfABFS, SkipIfADLS,
-                               SkipIfIsilon, SkipIfLocal)
+                               SkipIfIsilon, SkipIfLocal, SkipIfCatalogV2)
 
 
 class TestResetMetadata(TestDdlBase):
@@ -41,6 +41,7 @@ class TestResetMetadata(TestDdlBase):
   @SkipIfADLS.hive
   @SkipIfIsilon.hive
   @SkipIfLocal.hive
+  @SkipIfCatalogV2.partition_level_refresh_due_to_events()
   def test_refresh_updated_partitions(self, unique_database):
     """
     Test to exercise and confirm the query option REFRESH_UPDATED_HMS_PARTITIONS

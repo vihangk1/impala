@@ -86,6 +86,7 @@ import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.ColumnNotFoundException;
 import org.apache.impala.catalog.ColumnStats;
 import org.apache.impala.catalog.DataSource;
+import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeCatalogUtils;
 import org.apache.impala.catalog.IcebergTable;
@@ -336,6 +337,8 @@ public class CatalogOpExecutor {
   public CatalogServiceCatalog getCatalog() { return catalog_; }
 
   public AuthorizationManager getAuthzManager() { return authzManager_; }
+
+  public Object getMetastoreDdlLockObject() { return metastoreDdlLock_; }
 
   public TDdlExecResponse execDdlRequest(TDdlExecRequest ddlRequest)
       throws ImpalaException {
@@ -636,6 +639,149 @@ public class CatalogOpExecutor {
     if(catalog_.getLock().isWriteLockedByCurrentThread()) {
       LOG.error("Write lock should have been released.");
       catalog_.getLock().writeLock().unlock();
+    }
+  }
+
+  /**
+   * Remove a catalog table based on the given metastore table if it exists and its
+   * id matches with the id of the table in Catalog.
+   *
+   * @param msTable Metastore table to be used to remove Table
+   * @param tblWasfound is set to true if the table was found in the catalog
+   * @param tblMatched is set to true if the table is found and it matched with the
+   * id of the cached metastore table in catalog or if the existing table is a
+   * incomplete table
+   * @return Removed table object. Return null if the table was not removed
+   */
+  public Table removeTableIfExists(org.apache.hadoop.hive.metastore.api.Table msTable,
+      Reference<Boolean> tblWasfound, Reference<Boolean> tblMatched)
+      throws ImpalaRuntimeException {
+    tblWasfound.setRef(false);
+    tblMatched.setRef(false);
+    // make sure that the createTime of the input table is valid
+    Preconditions.checkState(msTable.getId() > 0);
+    synchronized (metastoreDdlLock_) {
+      Db db = catalog_.getDb(msTable.getDbName());
+      if (db == null) {
+        return null;
+      }
+
+      Table tblToBeRemoved = db.getTable(msTable.getTableName());
+      if (tblToBeRemoved == null) {
+        return null;
+      }
+
+      tblWasfound.setRef(true);
+      // make sure that you are removing the same instance of the table object which
+      // is given by comparing the metastore createTime. In case the found table is a
+      // Incomplete table remove it
+      long tblIdInCatalog = -1;
+      if (tblToBeRemoved instanceof IncompleteTable) {
+        try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
+          org.apache.hadoop.hive.metastore.api.Table tbl = metaStoreClient.getHiveClient()
+              .getTable(msTable.getDbName(), msTable.getTableName());
+          tblIdInCatalog = tbl.getId();
+        } catch (NoSuchObjectException e) {
+          // ignored
+        } catch (TException tException) {
+          throw new ImpalaRuntimeException(
+              String.format(HMS_RPC_ERROR_FORMAT_STR, "getTable"), tException);
+        }
+      } else {
+        tblIdInCatalog = tblToBeRemoved.getMetaStoreTable().getId();
+      }
+
+      // if tblIdInCatalog is -1 it means we didn't find it in metastore and hence we
+      // should remove it.
+      if (tblIdInCatalog == -1 || tblIdInCatalog == msTable.getId()) {
+        tblMatched.setRef(true);
+        Table removedTbl = db.removeTable(tblToBeRemoved.getName());
+        removedTbl.setCatalogVersion(catalog_.incrementAndGetCatalogVersion());
+        catalog_.getDeleteLog().addRemovedObject(removedTbl.toMinimalTCatalogObject());
+        return removedTbl;
+      }
+      return null;
+    }
+  }
+
+
+  /**
+   * Adds table with the given db and table name to the catalog if it does not exists.
+   * @return true if the table was successfully added and false if the table already
+   * exists
+   * @throws CatalogException if the db is not found
+   */
+  public boolean addTableIfNotExists(String dbName, String tblName)
+      throws DatabaseNotFoundException, CatalogException {
+    synchronized (metastoreDdlLock_) {
+      Db db = catalog_.getDb(dbName);
+      if (db == null) {
+        throw new DatabaseNotFoundException(String.format("Db %s does not exist", dbName));
+      }
+      Table existingTable = db.getTable(tblName);
+      if (existingTable != null) return false;
+      boolean tblExistsInMs;
+      try (MetaStoreClient client = catalog_.getMetaStoreClient()) {
+        tblExistsInMs = client.getHiveClient().tableExists(dbName, tblName);
+      } catch (TException e) {
+        throw new CatalogException(String.format(HMS_RPC_ERROR_FORMAT_STR,
+            "tableExists"), e);
+      }
+      if (!tblExistsInMs) {
+        LOG.debug("Table {}.{} does not exist in metastore. Not adding it.", dbName,
+            tblName);
+        return false;
+      }
+      Table incompleteTable = IncompleteTable.createUninitializedTable(db, tblName);
+      incompleteTable.setCatalogVersion(catalog_.incrementAndGetCatalogVersion());
+      db.addTable(incompleteTable);
+      return true;
+    }
+  }
+
+  /**
+   * Adds a database name to the metadata cache if not exists and returns the
+   * true is a new Db Object was added. Used by MetastoreEventProcessor to handle
+   * CREATE_DATABASE events
+   */
+  public boolean addDbIfNotExists(
+      String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
+    synchronized (metastoreDdlLock_) {
+      Db db = catalog_.getDb(dbName);
+      if (db == null) {
+        return catalog_.addDb(dbName, msDb) != null;
+      }
+      return false;
+    }
+  }
+
+  /**
+   * @param msDb Metastore Database used to remove Db from Catalog
+   * @param dbFound Set to true if Database is found in Catalog
+   * @param dbMatched Set to true if Database is found in Catalog and it's CREATION_TIME
+   * is equal to the metastore DB
+   * @return the DB object removed. Return null if DB does not exist or was not removed
+   * because CREATION_TIME does not match.
+   */
+  public Db removeDbIfExists(org.apache.hadoop.hive.metastore.api.Database msDb,
+      Reference<Boolean> dbFound, Reference<Boolean> dbMatched) {
+    dbFound.setRef(false);
+    dbMatched.setRef(false);
+    synchronized (metastoreDdlLock_) {
+      String dbName = msDb.getName();
+      Db catalogDb = catalog_.getDb(dbName);
+      if (catalogDb == null) return null;
+
+      dbFound.setRef(true);
+      // Remove the DB only if the CREATION_TIME matches with the metastore DB from event.
+      if (msDb.getCreateTime() == catalogDb.getMetaStoreDb().getCreateTime()) {
+        Db removedDb = catalog_.removeDb(dbName);
+        if (removedDb != null) {
+          dbMatched.setRef(true);
+          return removedDb;
+        }
+      }
+      return null;
     }
   }
 
@@ -2581,7 +2727,8 @@ public class CatalogOpExecutor {
         }
         // Add the table to the catalog cache
         Table newTbl = catalog_.addIncompleteTable(newTable.getDbName(),
-            newTable.getTableName());
+            newTable.getTableName(), getTableId(newTable.getDbName(),
+                newTable.getTableName()));
         addTableToCatalogUpdate(newTbl, wantMinimalResult, response.result);
       }
     } catch (Exception e) {
@@ -2610,6 +2757,12 @@ public class CatalogOpExecutor {
     return true;
   }
 
+  private long getTableId(String dbName, String tblName) throws TException {
+    try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      return msClient.getHiveClient().getTable(dbName, tblName).getId();
+    }
+  }
+
   /**
    * Creates a new table. The table is initially created in HMS and, if that operation
    * succeeds, it is then added in the catalog cache. It also sets HDFS caching if
@@ -2622,6 +2775,7 @@ public class CatalogOpExecutor {
       boolean wantMinimalResult, TDdlExecResponse response) throws ImpalaException {
     Preconditions.checkState(!KuduTable.isKuduTable(newTable));
     synchronized (metastoreDdlLock_) {
+      org.apache.hadoop.hive.metastore.api.Table msTable;
       try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
         if (primaryKeys == null && foreignKeys == null) {
           msClient.getHiveClient().createTable(newTable);
@@ -2634,7 +2788,7 @@ public class CatalogOpExecutor {
         // TODO (HIVE-21807): Creating a table and retrieving the table information is
         // not atomic.
         addSummary(response, "Table has been created.");
-        org.apache.hadoop.hive.metastore.api.Table msTable = msClient.getHiveClient()
+        msTable = msClient.getHiveClient()
             .getTable(newTable.getDbName(), newTable.getTableName());
         long tableCreateTime = msTable.getCreateTime();
         response.setTable_name(newTable.getDbName() + "." + newTable.getTableName());
@@ -2676,7 +2830,7 @@ public class CatalogOpExecutor {
         applyAlterTable(newTable);
       }
       Table newTbl = catalog_.addIncompleteTable(newTable.getDbName(),
-          newTable.getTableName());
+          newTable.getTableName(), msTable.getId());
       addTableToCatalogUpdate(newTbl, wantMinimalResult, response.result);
       if (authzConfig_.isEnabled()) {
         authzManager_.updateTableOwnerPrivilege(serverName, newTable.getDbName(),
@@ -2810,7 +2964,8 @@ public class CatalogOpExecutor {
         }
         // Add the table to the catalog cache
         Table newTbl = catalog_.addIncompleteTable(newTable.getDbName(),
-            newTable.getTableName());
+            newTable.getTableName(), getTableId(newTable.getDbName(),
+                newTable.getTableName()));
         addTableToCatalogUpdate(newTbl, wantMinimalResult, response.result);
       }
     } catch (Exception e) {
