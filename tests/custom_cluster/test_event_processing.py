@@ -200,7 +200,9 @@ class TestEventProcessing(CustomClusterTestSuite):
       catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
       cluster_size=1)
   def test_create_drop_table_local(self, unique_database):
-    self.__run_create_drop_test(unique_database)
+    # self.__run_create_drop_test(unique_database)
+    #self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "partition")
 
   @pytest.mark.execute_serially
   @CustomClusterTestSuite.with_args(
@@ -208,13 +210,34 @@ class TestEventProcessing(CustomClusterTestSuite):
     cluster_size=1)
   def test_create_drop_table(self, unique_database):
     self.__run_create_drop_test(unique_database)
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "partition")
 
-  def __run_create_drop_test(self, db):
+  def __run_create_drop_test(self, db, type="table"):
     NUM_ITERS = 1000
+    if type == "table":
+      queries = [
+        "create table {0}.test_{1} (i int)".format(db, 1),
+        "drop table {0}.test_{1}".format(db, 1)
+      ]
+    elif type == "database":
+      self.execute_query_expect_success(self.create_impala_client(),
+        "drop database if exists {0}".format("test_create_drop_db"))
+      queries = [
+        "create database {db}".format(db="test_create_drop_db"),
+        "drop database {db}".format(db="test_create_drop_db")
+      ]
+    else:
+      tbl_name = "test_create_drop_partition"
+      self.execute_query_expect_success(self.create_impala_client(),
+        "create table {db}.{tbl} (c int) partitioned by (p int)".format(
+          db=db, tbl=tbl_name))
+      queries = [
+        "alter table {db}.{tbl} add partition (p=1)".format(db=db, tbl=tbl_name),
+        "alter table {db}.{tbl} drop partition (p=1)".format(db=db, tbl=tbl_name)
+      ]
     for iter in xrange(NUM_ITERS):
-      for q in [
-        "create table {db}.test_{i} (i int)",
-        "drop table {db}.test_{i}"]:
+      for q in queries:
         try:
           self.execute_query_expect_success(self.create_impala_client(),
             q.format(db=db, i=1))
