@@ -444,6 +444,19 @@ class TestLocalCatalogRetries(CustomClusterTestSuite):
     for i in t.imap_unordered(do_table, xrange(NUM_ITERS)):
       pass
 
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+      impalad_args="--use_local_catalog=true",
+      catalogd_args="--catalog_topic_mode=minimal",
+      cluster_size=1)
+  def test_create_drop(self, unique_database):
+    client1 = self.create_impala_client()
+    client2 = self.create_impala_client()
+    for iter in xrange(100):
+      self.execute_query_expect_success(client1,
+        "create table {db}.{tbl} (c1 int)".format(db=unique_database, tbl="t1"))
+      self.execute_query_expect_success(client2,
+        "drop table {db}.{tbl}".format(db=unique_database, tbl="t1"))
 
 class TestObservability(CustomClusterTestSuite):
   def get_catalog_cache_metrics(self, impalad):
