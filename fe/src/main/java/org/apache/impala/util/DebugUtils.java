@@ -46,6 +46,8 @@ public class DebugUtils {
   // debug action label for introducing delay in update stats command.
   public static final String UPDATE_STATS_DELAY = "catalogd_update_stats_delay";
 
+  public static final String DELAY_BETWEEN_HMS_AND_CATALOG_OPS = "catalogd_hms_catalog_delay";
+
   /**
    * Given list of debug actions, execute the debug action pertaining to the given label.
    * The debugActions string is of the format specified for the query_option/configuration

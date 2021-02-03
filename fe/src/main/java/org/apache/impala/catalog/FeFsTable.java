@@ -521,6 +521,12 @@ public interface FeFsTable extends FeTable {
         return null;
       }
 
+      List<LiteralExpr> targetValExprs = null;
+      try {
+        targetValExprs = FeCatalogUtils.parsePartitionKeyValues(table, targetValues);
+      } catch (CatalogException e) {
+        return null;
+      }
       // Search through all the partitions and check if their partition key values
       // match the values being searched for.
       for (PrunablePartition partition: table.getPartitions()) {
@@ -539,7 +545,7 @@ public interface FeFsTable extends FeTable {
             // backwards compatibility with Hive, and is clearly broken.
             if (value.isEmpty()) value = table.getNullPartitionKeyValue();
           }
-          if (!targetValues.get(i).equals(value)) {
+          if (!targetValExprs.get(i).getStringValue().equals(value)) {
             matchFound = false;
             break;
           }

@@ -50,6 +50,7 @@ import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
+import org.apache.impala.catalog.FeCatalogUtils;
 import org.apache.impala.catalog.HdfsTable;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.Table;
@@ -1417,6 +1418,7 @@ public class MetastoreEvents {
               addedPartitions_.size(), getFullyQualifiedTblName());
           //TODO refresh all the partition together instead of looping one by one
           for (Partition partition : addedPartitions_) {
+            //FeCatalogUtils.parsePartitionKeyValues()
             List<TPartitionKeyValue> tPartSpec =
                 getTPartitionSpecFromHmsPartition(msTbl_, partition);
             if (!reloadPartition(tPartSpec, "ADD_PARTITION")) break;

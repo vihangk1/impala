@@ -213,6 +213,7 @@ class TestEventProcessing(CustomClusterTestSuite):
     self.__run_create_drop_test(unique_database, "database")
     self.__run_create_drop_test(unique_database, "partition")
 
+
   def __run_create_drop_test(self, db, type="table"):
     NUM_ITERS = 1000
     if type == "table":
@@ -244,6 +245,45 @@ class TestEventProcessing(CustomClusterTestSuite):
         except:
           print("Failed in {} iterations".format(iter))
           raise
+    assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    catalogd_args="--hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_rename_table(self, unique_database):
+    self.__run_rename_test(unique_database)
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+      impalad_args="--use_local_catalog=true",
+      catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
+      cluster_size=1)
+  def test_rename_table_local(self, unique_database):
+    self.__run_rename_test(unique_database)
+
+  def __run_rename_test(self, db):
+    self.execute_query_expect_success(self.create_impala_client(),
+      "create table {db}.{tbl} (c1 int)".format(db=db, tbl="t1"))
+    client = self.create_impala_client()
+    NUM_ITERS = 1000
+    toggle = True
+    q = "alter table {db}.{tbl} rename to {db}.{renamed_tbl}"
+    for iter in xrange(NUM_ITERS):
+      try:
+        if toggle:
+          tbl = "t1"
+          renamed_tbl = "t2"
+          toggle = False
+        else:
+          tbl = "t2"
+          renamed_tbl = "t1"
+          toggle = True
+        self.execute_query_expect_success(client,
+          q.format(db=db, tbl=tbl, renamed_tbl=renamed_tbl))
+      except:
+        print("Failed in {} iterations".format(iter))
+        raise
     assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
 
   @pytest.mark.xfail(run=False, reason="This is failing due to HIVE-23995")

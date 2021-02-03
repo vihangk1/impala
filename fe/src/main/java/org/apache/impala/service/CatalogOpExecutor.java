@@ -289,7 +289,7 @@ import org.slf4j.LoggerFactory;
 public class CatalogOpExecutor {
   private static final Logger LOG = LoggerFactory.getLogger(CatalogOpExecutor.class);
   // Format string for exceptions returned by Hive Metastore RPCs.
-  private final static String HMS_RPC_ERROR_FORMAT_STR =
+  public final static String HMS_RPC_ERROR_FORMAT_STR =
       "Error making '%s' RPC to Hive Metastore: ";
   // Error string for inconsistent blacklisted dbs/tables configs between catalogd and
   // coordinators.
@@ -4031,6 +4031,8 @@ public class CatalogOpExecutor {
         tbl.getMetaStoreTable().deepCopy();
     TableName tableName = tbl.getTableName();
     for (List<String> partitionSpecValues: partitionsNotInHms) {
+      LOG.info("VIHANG-DEBUG: Found partition not in HMS: {}",
+          Joiner.on(",").join(partitionSpecValues));
       hmsPartitions.add(createHmsPartitionFromValues(
           partitionSpecValues, msTbl, tableName, null));
     }
@@ -4056,6 +4058,8 @@ public class CatalogOpExecutor {
         // ifNotExists and needResults are true.
         List<Partition> hmsAddedPartitions =
             msClient.getHiveClient().add_partitions(hmsSublist, true, true);
+        DebugUtils.executeDebugAction(debugAction,
+            DebugUtils.DELAY_BETWEEN_HMS_AND_CATALOG_OPS);
         addHdfsPartitions(tbl, hmsAddedPartitions);
         // Handle HDFS cache.
         if (cachePoolName != null) {

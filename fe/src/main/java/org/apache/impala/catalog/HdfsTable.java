@@ -909,6 +909,8 @@ public class HdfsTable extends Table implements FeFsTable {
   public boolean addPartitionNoThrow(HdfsPartition partition) {
     if (partitionMap_.containsKey(partition.getId())) return false;
     if (partition.getFileFormat() == HdfsFileFormat.AVRO) hasAvroData_ = true;
+    LOG.info("VIHANG-DEBUG: Adding partition {} to table {}",
+        partition.getPartitionName(), getFullName());
     partitionMap_.put(partition.getId(), partition);
     fileMetadataStats_.totalFileBytes += partition.getSize();
     fileMetadataStats_.numFiles += partition.getNumFileDescriptors();
@@ -997,6 +999,7 @@ public class HdfsTable extends Table implements FeFsTable {
   private HdfsPartition dropPartition(HdfsPartition partition,
       boolean removeCacheDirective) {
     if (partition == null) return null;
+    LOG.info("VIHANG-DEBUG: Dropping partition {}", partition.getPartitionName());
     fileMetadataStats_.totalFileBytes -= partition.getSize();
     fileMetadataStats_.numFiles -= partition.getNumFileDescriptors();
     Preconditions.checkArgument(partition.getPartitionValues().size() ==

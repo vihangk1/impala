@@ -27,6 +27,8 @@ from tests.util.filesystem_utils import WAREHOUSE, IS_S3
 
 from tests.common.test_dimensions import create_uncompressed_text_dimension
 
+import time
+
 # Validates ALTER TABLE RECOVER PARTITIONS statement
 
 class TestRecoverPartitions(ImpalaTestSuite):
@@ -394,6 +396,7 @@ class TestRecoverPartitions(ImpalaTestSuite):
     for i in xrange(1, num_partitions):
         PART_DIR = "i=%d/s=part%d" % (i,i)
         self.filesystem_client.make_dir(TBL_LOCATION + PART_DIR)
+        #time.sleep(10)
 
     # Adds a duplicate directory name.
     self.filesystem_client.make_dir(TBL_LOCATION + "i=001/s=part1")
@@ -405,9 +408,10 @@ class TestRecoverPartitions(ImpalaTestSuite):
         "SHOW PARTITIONS %s" % FQ_TBL_NAME)
     assert 0 == self.count_partition(result.data)
     self.execute_query_expect_success(self.client,
-        "ALTER TABLE %s RECOVER PARTITIONS" % FQ_TBL_NAME)
+      "ALTER TABLE %s RECOVER PARTITIONS" % FQ_TBL_NAME)
     result = self.execute_query_expect_success(self.client,
         "SHOW PARTITIONS %s" % FQ_TBL_NAME)
+    print(result)
     assert num_partitions - 1 == self.count_partition(result.data)
     for i in xrange(1, num_partitions):
         PART_DIR = "part%d\t" % i

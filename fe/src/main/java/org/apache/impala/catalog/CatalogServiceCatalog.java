@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog;
 
+import static org.apache.impala.service.CatalogOpExecutor.HMS_RPC_ERROR_FORMAT_STR;
 import static org.apache.impala.thrift.TCatalogObjectType.HDFS_PARTITION;
 import static org.apache.impala.thrift.TCatalogObjectType.TABLE;
 
@@ -2265,16 +2266,36 @@ public class CatalogServiceCatalog extends Catalog {
   /**
    * Renames the table by atomically removing oldTable and adding the newTable.
    * @return true if oldTable was removed and newTable was added, false if oldTable or
-   * either of oldDb or newDb is not in catalog.
+   * either of oldDb or newDb is not in catalog. Also makes sure that the target table
+   * for the rename exists in metastore before renaming.
    */
   public boolean renameTableIfExists(TTableName oldTableName,
-      TTableName newTableName) {
+      TTableName newTableName) throws CatalogException {
     boolean tableRenamed = false;
     versionLock_.writeLock().lock();
     try {
       Db oldDb = getDb(oldTableName.db_name);
       Db newDb = getDb(newTableName.db_name);
       if (oldDb != null && newDb != null) {
+        org.apache.hadoop.hive.metastore.api.Table msTbl = null;
+        try (MetaStoreClient client = getMetaStoreClient()) {
+          // it is possible that by the time we receive the event here, the renamed
+          // table is already removed. Check in metastore of the table which we are
+          // renaming to exists.
+          try {
+            msTbl = client.getHiveClient()
+                .getTable(newTableName.db_name, newTableName.table_name);
+          } catch (NoSuchObjectException e ) {
+            LOG.info(
+                "Target table of the rename {} does not exist in metastore anymore. Not renaming.",
+                newTableName);
+            return false;
+          } catch (TException e) {
+            throw new CatalogException(String.format(HMS_RPC_ERROR_FORMAT_STR,
+                "getTable"), e);
+          }
+        }
+        Preconditions.checkNotNull(msTbl);
         Table existingTable = removeTable(oldTableName.db_name, oldTableName.table_name);
         // Add the newTable only if oldTable existed.
         if (existingTable != null) {
@@ -2285,7 +2306,7 @@ public class CatalogServiceCatalog extends Catalog {
             deleteLog_.addRemovedObject(existingTable.toMinimalTCatalogObject());
           }
           Table incompleteTable = IncompleteTable.createUninitializedTable(newDb,
-              newTableName.getTable_name());
+              newTableName.getTable_name(), msTbl.getId());
           incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
           newDb.addTable(incompleteTable);
           tableRenamed = true;
