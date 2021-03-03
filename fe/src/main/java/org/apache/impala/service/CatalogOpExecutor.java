@@ -79,15 +79,19 @@ import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.authorization.AuthorizationDelta;
 import org.apache.impala.authorization.AuthorizationManager;
 import org.apache.impala.authorization.User;
+import org.apache.impala.catalog.CatalogDeltaLog;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogObject;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.ColumnNotFoundException;
 import org.apache.impala.catalog.ColumnStats;
+import org.apache.impala.catalog.CreateDatabaseOperation;
+import org.apache.impala.catalog.CreateTableOperation;
 import org.apache.impala.catalog.DataSource;
 import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
+import org.apache.impala.catalog.DropDatabaseOperation;
 import org.apache.impala.catalog.FeCatalogUtils;
 import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.FeFsPartition;
@@ -112,6 +116,7 @@ import org.apache.impala.catalog.TableNotFoundException;
 import org.apache.impala.catalog.Transaction;
 import org.apache.impala.catalog.Type;
 import org.apache.impala.catalog.View;
+import org.apache.impala.catalog.events.EventDeleteLog;
 import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventPropertyKey;
 import org.apache.impala.catalog.monitor.CatalogMonitor;
 import org.apache.impala.catalog.monitor.CatalogOperationMetrics;
@@ -289,7 +294,7 @@ import org.slf4j.LoggerFactory;
 public class CatalogOpExecutor {
   private static final Logger LOG = LoggerFactory.getLogger(CatalogOpExecutor.class);
   // Format string for exceptions returned by Hive Metastore RPCs.
-  private final static String HMS_RPC_ERROR_FORMAT_STR =
+  public final static String HMS_RPC_ERROR_FORMAT_STR =
       "Error making '%s' RPC to Hive Metastore: ";
   // Error string for inconsistent blacklisted dbs/tables configs between catalogd and
   // coordinators.
@@ -325,6 +330,10 @@ public class CatalogOpExecutor {
   // Lock used to ensure that CREATE[DROP] TABLE[DATABASE] operations performed in
   // catalog_ and the corresponding RPC to apply the change in HMS are atomic.
   private final Object metastoreDdlLock_ = new Object();
+
+  // keeps track of deleted catalog objects so that eventsProcessor can avoid adding
+  // already removed catalog object.
+  private final EventDeleteLog eventDeleteLog_ = new EventDeleteLog();
 
   public CatalogOpExecutor(CatalogServiceCatalog catalog, AuthorizationConfig authzConfig,
       AuthorizationManager authzManager) throws ImpalaException {
@@ -382,36 +391,35 @@ public class CatalogOpExecutor {
           TCreateDbParams create_db_params = ddlRequest.getCreate_db_params();
           tTableName = Optional.of(new TTableName(create_db_params.db, ""));
           catalogOpMetric_.increment(ddl_type, tTableName);
-          createDatabase(create_db_params, response, syncDdl, wantMinimalResult);
+          createDatabase(ddlRequest, response, syncDdl, wantMinimalResult);
           break;
         case CREATE_TABLE_AS_SELECT:
           TCreateTableParams create_table_as_select_params =
               ddlRequest.getCreate_table_params();
           tTableName = Optional.of(create_table_as_select_params.getTable_name());
           catalogOpMetric_.increment(ddl_type, tTableName);
-          response.setNew_table_created(createTable(create_table_as_select_params,
+          response.setNew_table_created(createTable(ddlRequest,
               response, syncDdl, wantMinimalResult));
           break;
         case CREATE_TABLE:
           TCreateTableParams create_table_params = ddlRequest.getCreate_table_params();
           tTableName = Optional.of((create_table_params.getTable_name()));
           catalogOpMetric_.increment(ddl_type, tTableName);
-          createTable(ddlRequest.getCreate_table_params(), response, syncDdl,
-              wantMinimalResult);
+          createTable(ddlRequest, response, syncDdl, wantMinimalResult);
           break;
         case CREATE_TABLE_LIKE:
           TCreateTableLikeParams create_table_like_params =
               ddlRequest.getCreate_table_like_params();
           tTableName = Optional.of(create_table_like_params.getTable_name());
           catalogOpMetric_.increment(ddl_type, tTableName);
-          createTableLike(create_table_like_params, response, syncDdl, wantMinimalResult);
+          createTableLike(ddlRequest, response, syncDdl, wantMinimalResult);
           break;
         case CREATE_VIEW:
           TCreateOrAlterViewParams create_view_params =
               ddlRequest.getCreate_view_params();
           tTableName = Optional.of(create_view_params.getView_name());
           catalogOpMetric_.increment(ddl_type, tTableName);
-          createView(create_view_params, wantMinimalResult, response);
+          createView(ddlRequest, wantMinimalResult, response);
           break;
         case CREATE_FUNCTION:
           catalogOpMetric_.increment(ddl_type, Optional.empty());
@@ -435,7 +443,7 @@ public class CatalogOpExecutor {
           TDropDbParams drop_db_params = ddlRequest.getDrop_db_params();
           tTableName = Optional.of(new TTableName(drop_db_params.getDb(), ""));
           catalogOpMetric_.increment(ddl_type, tTableName);
-          dropDatabase(drop_db_params, response);
+          dropDatabase(ddlRequest, response);
           break;
         case DROP_TABLE:
         case DROP_VIEW:
@@ -744,14 +752,17 @@ public class CatalogOpExecutor {
    * true is a new Db Object was added. Used by MetastoreEventProcessor to handle
    * CREATE_DATABASE events
    */
-  public boolean addDbIfNotExists(
-      String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
+  public boolean addDbIfNotRemovedLater(
+      long eventId, String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
     synchronized (metastoreDdlLock_) {
       Db db = catalog_.getDb(dbName);
       if (db == null) {
-        return catalog_.addDb(dbName, msDb) != null;
+        // if the db doesn't exist in the catalog; make sure that it was not deleted
+        // recently to make sure that we don't add it again.
+        if (eventDeleteLog_.wasRemovedAfter(eventId, msDb)) return false;
       }
-      return false;
+      catalog_.addDb(dbName, msDb);
+      return true;
     }
   }
 
@@ -1154,6 +1165,7 @@ public class CatalogOpExecutor {
       boolean reloadFileMetadata, boolean reloadTableSchema,
       Set<String> partitionsToUpdate, String reason) throws CatalogException {
     Preconditions.checkState(tbl.isWriteLockedByCurrentThread());
+    // TODO(Self-event) update using events
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       org.apache.hadoop.hive.metastore.api.Table msTbl =
           getMetaStoreTable(msClient, tbl);
@@ -1257,14 +1269,14 @@ public class CatalogOpExecutor {
    */
   private void addCatalogServiceIdentifiers(Table tbl, String catalogServiceId,
       long newCatalogVersion) {
-    if (!catalog_.isEventProcessingActive()) return;
+    /*if (!catalog_.isEventProcessingActive()) return;
     org.apache.hadoop.hive.metastore.api.Table msTbl = tbl.getMetaStoreTable();
     msTbl.putToParameters(
         MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(),
         catalogServiceId);
     msTbl.putToParameters(
         MetastoreEventPropertyKey.CATALOG_VERSION.getKey(),
-        String.valueOf(newCatalogVersion));
+        String.valueOf(newCatalogVersion));*/
   }
 
   /**
@@ -1502,8 +1514,9 @@ public class CatalogOpExecutor {
    * may vary depending on the Meta Store connection type (thrift vs direct db).
    * @param  syncDdl tells if SYNC_DDL option is enabled on this DDL request.
    */
-  private void createDatabase(TCreateDbParams params, TDdlExecResponse resp,
+  private void createDatabase(TDdlExecRequest request, TDdlExecResponse resp,
       boolean syncDdl, boolean wantMinimalResult) throws ImpalaException {
+    TCreateDbParams params = request.getCreate_db_params();
     Preconditions.checkNotNull(params);
     String dbName = params.getDb();
     Preconditions.checkState(dbName != null && !dbName.isEmpty(),
@@ -1560,45 +1573,12 @@ public class CatalogOpExecutor {
     db.setOwnerName(params.getOwner());
     db.setOwnerType(PrincipalType.USER);
     if (LOG.isTraceEnabled()) LOG.trace("Creating database " + dbName);
-    Db newDb = null;
     synchronized (metastoreDdlLock_) {
-      try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-        try {
-          msClient.getHiveClient().createDatabase(db);
-          // Load the database back from the HMS. It's unfortunate we need two
-          // RPCs here, but otherwise we can't populate the location field of the
-          // DB properly. We'll take the slight chance of a race over the incorrect
-          // behavior of showing no location in 'describe database' (IMPALA-7439).
-          db = msClient.getHiveClient().getDatabase(dbName);
-          newDb = catalog_.addDb(dbName, db);
-          addSummary(resp, "Database has been created.");
-        } catch (AlreadyExistsException e) {
-          if (!params.if_not_exists) {
-            throw new ImpalaRuntimeException(
-                String.format(HMS_RPC_ERROR_FORMAT_STR, "createDatabase"), e);
-          }
-          addSummary(resp, "Database already exists.");
-          if (LOG.isTraceEnabled()) {
-            LOG.trace(String.format("Ignoring '%s' when creating database %s because " +
-                "IF NOT EXISTS was specified.", e, dbName));
-          }
-          newDb = catalog_.getDb(dbName);
-          if (newDb == null) {
-            try {
-              org.apache.hadoop.hive.metastore.api.Database msDb =
-                  msClient.getHiveClient().getDatabase(dbName);
-              newDb = catalog_.addDb(dbName, msDb);
-            } catch (TException e1) {
-              throw new ImpalaRuntimeException(
-                  String.format(HMS_RPC_ERROR_FORMAT_STR, "createDatabase"), e1);
-            }
-          }
-        } catch (TException e) {
-          throw new ImpalaRuntimeException(
-              String.format(HMS_RPC_ERROR_FORMAT_STR, "createDatabase"), e);
-        }
-      }
-
+      //TODO(Self-events) create a self-events version of this
+      CreateDatabaseOperation createDbOp = new CreateDatabaseOperation(catalog_, request,
+          resp, db);
+      createDbOp.execute();
+      Db newDb = createDbOp.getCreatedDb();
       addDbToCatalogUpdate(newDb, wantMinimalResult, resp.result);
       if (authzConfig_.isEnabled()) {
         authzManager_.updateDatabaseOwnerPrivilege(params.server_name, newDb.getName(),
@@ -1674,6 +1654,7 @@ public class CatalogOpExecutor {
         // catalog might end up in a inconsistent state. Ideally, we should make a copy
         // of hms Database object and then update the Db once the HMS operation succeeds
         // similar to what happens in alterDatabaseSetOwner method.
+        // TODO(Self-event) update using events (Should we use FUNCTION events?)
         if (catalog_.addFunction(fn)) {
           addCatalogServiceIdentifiers(db.getMetaStoreDb(),
               catalog_.getCatalogServiceId(), newCatalogVersion);
@@ -1782,6 +1763,7 @@ public class CatalogOpExecutor {
           }
         }
       }
+      // TODO(Self-event-Load) update using events
       loadTableMetadata(table, newCatalogVersion, /*reloadFileMetadata=*/false,
           /*reloadTableSchema=*/true, /*partitionsToUpdate=*/null, "DROP STATS");
       addTableToCatalogUpdate(table, wantMinimalResult, resp.result);
@@ -1885,8 +1867,9 @@ public class CatalogOpExecutor {
    * internal cache. Attempts to remove the HDFS cache directives of the underlying
    * tables. Re-throws any HMS exceptions encountered during the drop.
    */
-  private void dropDatabase(TDropDbParams params, TDdlExecResponse resp)
+  private void dropDatabase(TDdlExecRequest request, TDdlExecResponse resp)
       throws ImpalaException {
+    TDropDbParams params = request.getDrop_db_params();
     Preconditions.checkNotNull(params);
     String dbName = params.getDb();
     Preconditions.checkState(dbName != null && !dbName.isEmpty(),
@@ -1910,29 +1893,9 @@ public class CatalogOpExecutor {
     synchronized (metastoreDdlLock_) {
       // Remove all the Kudu tables of 'db' from the Kudu storage engine.
       if (db != null && params.cascade) dropTablesFromKudu(db);
-
-      // The Kudu tables in the HMS should have been dropped at this point
-      // with the Hive Metastore integration enabled.
-      try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-        // HMS client does not have a way to identify if the database was dropped or
-        // not if the ignoreIfUnknown flag is true. Hence we always pass the
-        // ignoreIfUnknown as false and catch the NoSuchObjectFoundException and
-        // determine if we should throw or not
-        msClient.getHiveClient().dropDatabase(
-            dbName, /* deleteData */true, /* ignoreIfUnknown */false,
-            params.cascade);
-        addSummary(resp, "Database has been dropped.");
-      } catch (TException e) {
-        if (e instanceof NoSuchObjectException && params.if_exists) {
-          // if_exists param was set; we ignore the NoSuchObjectFoundException
-          addSummary(resp, "Database does not exist.");
-        } else {
-          throw new ImpalaRuntimeException(
-              String.format(HMS_RPC_ERROR_FORMAT_STR, "dropDatabase"), e);
-        }
-      }
-      Db removedDb = catalog_.removeDb(dbName);
-
+      DropDatabaseOperation dropDbOp = new DropDatabaseOperation(catalog_, request, resp,
+          dbName);
+      Db removedDb = dropDbOp.getRemovedDb();
       if (removedDb == null) {
         // Nothing was removed from the catalogd's cache.
         resp.result.setVersion(catalog_.getCatalogVersion());
@@ -2183,6 +2146,7 @@ public class CatalogOpExecutor {
       }
       addSummary(resp, (params.is_table ? "Table " : "View ") + "has been dropped.");
 
+      // TODO(Self-event) update using events
       Table table = catalog_.removeTable(params.getTable_name().db_name,
           params.getTable_name().table_name);
       if (table == null) {
@@ -2293,6 +2257,7 @@ public class CatalogOpExecutor {
       }
       Preconditions.checkState(newCatalogVersion > 0);
       addSummary(resp, "Table has been truncated.");
+      // TODO(Self-event-Load) update using events
       loadTableMetadata(table, newCatalogVersion, true, true, null, "TRUNCATE");
       addTableToCatalogUpdate(table, wantMinimalResult, resp.result);
     } finally {
@@ -2544,8 +2509,9 @@ public class CatalogOpExecutor {
    * @return true if a new table has been created with the given params, false
    * otherwise.
    */
-  private boolean createTable(TCreateTableParams params, TDdlExecResponse response,
+  private boolean createTable(TDdlExecRequest request, TDdlExecResponse response,
       boolean syncDdl, boolean wantMinimalResult) throws ImpalaException {
+    TCreateTableParams params = request.getCreate_table_params();
     Preconditions.checkNotNull(params);
     TableName tableName = TableName.fromThrift(params.getTable_name());
     Preconditions.checkState(tableName != null && tableName.isFullyQualified());
@@ -2595,9 +2561,7 @@ public class CatalogOpExecutor {
     }
     Preconditions.checkState(params.getColumns().size() > 0,
         "Empty column list given as argument to Catalog.createTable");
-    return createTable(tbl, params.if_not_exists, params.getCache_op(),
-        params.server_name, params.getPrimary_keys(), params.getForeign_keys(),
-        wantMinimalResult, response);
+    return createTable(tbl, request, wantMinimalResult, response);
   }
 
   /**
@@ -2770,67 +2734,17 @@ public class CatalogOpExecutor {
    * Returns true if a new table was created as part of this call, false otherwise.
    */
   private boolean createTable(org.apache.hadoop.hive.metastore.api.Table newTable,
-      boolean if_not_exists, THdfsCachingOp cacheOp, String serverName,
-      List<SQLPrimaryKey> primaryKeys, List<SQLForeignKey> foreignKeys,
-      boolean wantMinimalResult, TDdlExecResponse response) throws ImpalaException {
+      TDdlExecRequest request, boolean wantMinimalResult, TDdlExecResponse response)
+      throws ImpalaException {
     Preconditions.checkState(!KuduTable.isKuduTable(newTable));
+    TCreateTableParams params = request.create_table_params;
+    String serverName = params.server_name;
     synchronized (metastoreDdlLock_) {
-      org.apache.hadoop.hive.metastore.api.Table msTable;
-      try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-        if (primaryKeys == null && foreignKeys == null) {
-          msClient.getHiveClient().createTable(newTable);
-        } else {
-          MetastoreShim.createTableWithConstraints(
-              msClient.getHiveClient(), newTable,
-              primaryKeys == null ? new ArrayList<>() : primaryKeys,
-              foreignKeys == null ? new ArrayList<>() : foreignKeys);
-        }
-        // TODO (HIVE-21807): Creating a table and retrieving the table information is
-        // not atomic.
-        addSummary(response, "Table has been created.");
-        msTable = msClient.getHiveClient()
-            .getTable(newTable.getDbName(), newTable.getTableName());
-        long tableCreateTime = msTable.getCreateTime();
-        response.setTable_name(newTable.getDbName() + "." + newTable.getTableName());
-        response.setTable_create_time(tableCreateTime);
-        // For external tables set table location needed for lineage generation.
-        if (newTable.getTableType() == TableType.EXTERNAL_TABLE.toString()) {
-          String tableLocation = newTable.getSd().getLocation();
-          // If location was not specified in the query, get it from newly created
-          // metastore table.
-          if (tableLocation == null) {
-            tableLocation = msTable.getSd().getLocation();
-          }
-          response.setTable_location(tableLocation);
-        }
-        // If this table should be cached, and the table location was not specified by
-        // the user, an extra step is needed to read the table to find the location.
-        if (cacheOp != null && cacheOp.isSet_cached() &&
-            newTable.getSd().getLocation() == null) {
-          newTable = msClient.getHiveClient().getTable(
-              newTable.getDbName(), newTable.getTableName());
-        }
-      } catch (Exception e) {
-        if (e instanceof AlreadyExistsException && if_not_exists) {
-          addSummary(response, "Table already exists");
-          return false;
-        }
-        throw new ImpalaRuntimeException(
-            String.format(HMS_RPC_ERROR_FORMAT_STR, "createTable"), e);
-      }
-      // Submit the cache request and update the table metadata.
-      if (cacheOp != null && cacheOp.isSet_cached()) {
-        short replication = cacheOp.isSetReplication() ? cacheOp.getReplication() :
-            JniCatalogConstants.HDFS_DEFAULT_CACHE_REPLICATION_FACTOR;
-        long id = HdfsCachingUtil.submitCacheTblDirective(newTable,
-            cacheOp.getCache_pool_name(), replication);
-        catalog_.watchCacheDirs(Lists.<Long>newArrayList(id),
-            new TTableName(newTable.getDbName(), newTable.getTableName()),
-                "CREATE TABLE CACHED");
-        applyAlterTable(newTable);
-      }
-      Table newTbl = catalog_.addIncompleteTable(newTable.getDbName(),
-          newTable.getTableName(), msTable.getId());
+      CreateTableOperation createTableOperation = new CreateTableOperation(catalog_,
+          request, response, newTable);
+      createTableOperation.execute();
+      Table newTbl = createTableOperation.getCreatedTbl();
+      if (newTbl == null) return false;
       addTableToCatalogUpdate(newTbl, wantMinimalResult, response.result);
       if (authzConfig_.isEnabled()) {
         authzManager_.updateTableOwnerPrivilege(serverName, newTable.getDbName(),
@@ -2847,8 +2761,9 @@ public class CatalogOpExecutor {
    * lazily load the new metadata on the next access. Re-throws any Metastore
    * exceptions encountered during the create.
    */
-  private void createView(TCreateOrAlterViewParams params, boolean wantMinimalResult,
+  private void createView(TDdlExecRequest request, boolean wantMinimalResult,
       TDdlExecResponse response) throws ImpalaException {
+    TCreateOrAlterViewParams params = request.create_view_params;
     TableName tableName = TableName.fromThrift(params.getView_name());
     Preconditions.checkState(tableName != null && tableName.isFullyQualified());
     Preconditions.checkState(params.getColumns() != null &&
@@ -2868,8 +2783,7 @@ public class CatalogOpExecutor {
         new org.apache.hadoop.hive.metastore.api.Table();
     setCreateViewAttributes(params, view);
     LOG.trace(String.format("Creating view %s", tableName));
-    if (!createTable(view, params.if_not_exists, null, params.server_name,
-        new ArrayList<>(), new ArrayList<>(), wantMinimalResult, response)) {
+    if (!createTable(view, request, wantMinimalResult, response)) {
       addSummary(response, "View already exists.");
     } else {
       addSummary(response, "View has been created.");
@@ -2988,8 +2902,9 @@ public class CatalogOpExecutor {
    * table's metadata on the next access.
    * @param  syncDdl tells is SYNC_DDL is enabled for this DDL request.
    */
-  private void createTableLike(TCreateTableLikeParams params, TDdlExecResponse response,
+  private void createTableLike(TDdlExecRequest request, TDdlExecResponse response,
       boolean syncDdl, boolean wantMinimalResult) throws ImpalaException {
+    TCreateTableLikeParams params = request.getCreate_table_like_params();
     Preconditions.checkNotNull(params);
 
     THdfsFileFormat fileFormat =
@@ -3095,8 +3010,7 @@ public class CatalogOpExecutor {
     tbl.putToParameters(StatsSetupConst.ROW_COUNT, "-1");
     setDefaultTableCapabilities(tbl);
     LOG.trace(String.format("Creating table %s LIKE %s", tblName, srcTblName));
-    createTable(tbl, params.if_not_exists, null, params.server_name, null, null,
-        wantMinimalResult, response);
+    createTable(tbl, request, wantMinimalResult, response);
   }
 
   private static void setDefaultTableCapabilities(
@@ -3318,6 +3232,7 @@ public class CatalogOpExecutor {
       // If 'ifNotExists' is true, add_partitions() may fail to add all the partitions to
       // HMS because some of them may already exist there. In that case, we load in the
       // catalog the partitions that already exist in HMS but aren't in the catalog yet.
+      // TODO(Self-event) update using events
       if (allHmsPartitionsToAdd.size() != addedHmsPartitions.size()) {
         List<Partition> difference = computeDifference(allHmsPartitionsToAdd,
             addedHmsPartitions);
@@ -3486,6 +3401,7 @@ public class CatalogOpExecutor {
           String.format(HMS_RPC_ERROR_FORMAT_STR, "dropPartition"), e);
     }
     numUpdatedPartitions.setRef(numTargetedPartitions);
+    // TODO(Self-event) update using events
     return catalog_.dropPartitions(tbl, partitionSet);
   }
 
@@ -3564,6 +3480,7 @@ public class CatalogOpExecutor {
     }
     // Rename the table in the Catalog and get the resulting catalog object.
     // ALTER TABLE/VIEW RENAME is implemented as an ADD + DROP.
+    // TODO(Self-event) update using events; if table is not synchronized
     Pair<Table, Table> result =
         catalog_.renameTable(tableName.toThrift(), newTableName.toThrift());
     if (result.first == null || result.second == null) {
@@ -3900,6 +3817,7 @@ public class CatalogOpExecutor {
             try {
               applyAlterPartition(tbl, partBuilder);
             } finally {
+              // TODO(Self-event) update using events
               ((HdfsTable) tbl).markDirtyPartition(partBuilder);
             }
           }
@@ -3931,6 +3849,7 @@ public class CatalogOpExecutor {
             try {
               applyAlterPartition(tbl, partBuilder);
             } finally {
+              // TODO(Self-event) update using events
               ((HdfsTable) tbl).markDirtyPartition(partBuilder);
             }
           }
@@ -4056,6 +3975,7 @@ public class CatalogOpExecutor {
         // ifNotExists and needResults are true.
         List<Partition> hmsAddedPartitions =
             msClient.getHiveClient().add_partitions(hmsSublist, true, true);
+        // TODO(Self-event) update using events
         addHdfsPartitions(tbl, hmsAddedPartitions);
         // Handle HDFS cache.
         if (cachePoolName != null) {
@@ -4153,7 +4073,7 @@ public class CatalogOpExecutor {
    */
   private void addCatalogServiceIdentifiers(
       org.apache.hadoop.hive.metastore.api.Table msTbl, Partition partition) {
-    if (!catalog_.isEventProcessingActive()) return;
+    /*if (!catalog_.isEventProcessingActive()) return;
     Preconditions.checkState(msTbl.isSetParameters());
     Preconditions.checkNotNull(partition, "Partition is null");
     Map<String, String> tblParams = msTbl.getParameters();
@@ -4177,7 +4097,7 @@ public class CatalogOpExecutor {
           MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(), serviceIdFromTbl);
       partition.putToParameters(
           MetastoreEventPropertyKey.CATALOG_VERSION.getKey(), version);
-    }
+    }*/
   }
 
   /**
@@ -5249,6 +5169,7 @@ public class CatalogOpExecutor {
       } catch (ImpalaRuntimeException e) {
         throw e;
       }
+      // TODO(Self-event) update using events
       Db updatedDb = catalog_.updateDb(msDb);
       addDbToCatalogUpdate(updatedDb, wantMinimalResult, response.result);
       // now that HMS alter operation has succeeded, add this version to list of inflight
@@ -5305,6 +5226,7 @@ public class CatalogOpExecutor {
             originalOwnerName, originalOwnerType, msDb.getOwnerName(),
             msDb.getOwnerType(), response);
       }
+      // TODO(Self-event) update using events
       Db updatedDb = catalog_.updateDb(msDb);
       addDbToCatalogUpdate(updatedDb, wantMinimalResult, response.result);
       // now that HMS alter operation has succeeded, add this version to list of inflight
@@ -5322,12 +5244,12 @@ public class CatalogOpExecutor {
    */
   private void addCatalogServiceIdentifiers(
       Database msDb, String catalogServiceId, long newCatalogVersion) {
-    if (!catalog_.isEventProcessingActive()) return;
+    /*if (!catalog_.isEventProcessingActive()) return;
     Preconditions.checkNotNull(msDb);
     msDb.putToParameters(MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(),
         catalogServiceId);
     msDb.putToParameters(MetastoreEventPropertyKey.CATALOG_VERSION.getKey(),
-        String.valueOf(newCatalogVersion));
+        String.valueOf(newCatalogVersion));*/
   }
 
   private void addDbToCatalogUpdate(Db db, boolean wantMinimalResult,
@@ -5361,6 +5283,7 @@ public class CatalogOpExecutor {
         msTbl.getParameters().put("comment", comment);
       }
       applyAlterTable(msTbl);
+      // TODO(Self-event-Load) update using events
       loadTableMetadata(tbl, newCatalogVersion, false, false, null, "ALTER COMMENT");
       addTableToCatalogUpdate(tbl, wantMinimalResult, response.result);
       addSummary(response, String.format("Updated %s.", (isView) ? "view" : "table"));
@@ -5395,6 +5318,7 @@ public class CatalogOpExecutor {
         }
         applyAlterTable(msTbl);
       }
+      // TODO(Self-event-Load) update using events
       loadTableMetadata(tbl, newCatalogVersion, false, true, null,
           "ALTER COLUMN COMMENT");
       addTableToCatalogUpdate(tbl, wantMinimalResult, response.result);
