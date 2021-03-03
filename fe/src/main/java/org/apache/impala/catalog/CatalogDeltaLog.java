@@ -57,7 +57,7 @@ import com.google.common.collect.ImmutableList;
 public class CatalogDeltaLog {
   // Map of the catalog version an object was removed from the catalog
   // to the catalog object, ordered by catalog version.
-  private SortedMap<Long, TCatalogObject> removedCatalogObjects_ =
+  protected SortedMap<Long, TCatalogObject> removedCatalogObjects_ =
       new TreeMap<Long, TCatalogObject>();
 
   /**

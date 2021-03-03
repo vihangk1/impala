@@ -31,7 +31,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import javax.annotation.Nullable;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.IMetaStoreClient.NotificationFilter;
 import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.NotificationEventResponse;
@@ -455,15 +457,21 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     }
   }
 
-  /**
-   * Fetch the next batch of NotificationEvents from metastore. The default batch size if
-   * <code>EVENTS_BATCH_SIZE_PER_RPC</code>
-   */
-  @VisibleForTesting
-  protected List<NotificationEvent> getNextMetastoreEvents()
+  public static NotificationFilter createNotificationFilter(final String catalog,
+      final String dbName, final String tblName) {
+    return notificationEvent -> {
+      String eventCatName = notificationEvent.getCatName();
+      String eventDbName = notificationEvent.getDbName();
+      String eventTblName = notificationEvent.getTableName();
+      return catalog.equalsIgnoreCase(eventCatName) && dbName
+          .equalsIgnoreCase(eventDbName) && eventTblName.equalsIgnoreCase(tblName);
+    };
+  }
+
+  public List<NotificationEvent> getNextMetastoreEvents(final long eventId,
+      final boolean skipBatching, @Nullable final NotificationFilter filter)
       throws MetastoreNotificationFetchException {
     final Timer.Context context = metrics_.getTimer(EVENTS_FETCH_DURATION_METRIC).time();
-    long lastSyncedEventId = lastSyncedEventId_.get();
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       // fetch the current notification event id. We assume that the polling interval
       // is small enough that most of these polling operations result in zero new
@@ -474,22 +482,31 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
       long currentEventId = currentNotificationEventId.getEventId();
 
       // no new events since we last polled
-      if (currentEventId <= lastSyncedEventId) {
+      if (currentEventId <= eventId) {
         return Collections.emptyList();
       }
-
+      int batchSize = skipBatching ? -1 : EVENTS_BATCH_SIZE_PER_RPC;
       NotificationEventResponse response = msClient.getHiveClient()
-          .getNextNotification(lastSyncedEventId, EVENTS_BATCH_SIZE_PER_RPC, null);
+          .getNextNotification(eventId, batchSize, filter);
       LOG.info(String.format("Received %d events. Start event id : %d",
-          response.getEvents().size(), lastSyncedEventId));
+          response.getEvents().size(), eventId));
       return response.getEvents();
     } catch (TException e) {
       throw new MetastoreNotificationFetchException(
           "Unable to fetch notifications from metastore. Last synced event id is "
-              + lastSyncedEventId, e);
+              + eventId, e);
     } finally {
       context.stop();
     }
+  }
+  /**
+   * Fetch the next batch of NotificationEvents from metastore. The default batch size if
+   * <code>EVENTS_BATCH_SIZE_PER_RPC</code>
+   */
+  @VisibleForTesting
+  protected List<NotificationEvent> getNextMetastoreEvents()
+      throws MetastoreNotificationFetchException {
+    return getNextMetastoreEvents(lastSyncedEventId_.get(), false, null);
   }
 
   /**

@@ -31,10 +31,8 @@ import java.util.Objects;
 import java.util.Map;
 
 import org.apache.hadoop.hive.metastore.api.Database;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.NotificationEvent;
 import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.messaging.AddPartitionMessage;
 import org.apache.hadoop.hive.metastore.messaging.AlterPartitionMessage;
 import org.apache.hadoop.hive.metastore.messaging.CreateTableMessage;
@@ -51,20 +49,17 @@ import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.DatabaseNotFoundException;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.HdfsTable;
-import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.Table;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.TableNotFoundException;
 import org.apache.impala.catalog.TableNotLoadedException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.common.Metrics;
-import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
 import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TPartitionKeyValue;
 import org.apache.impala.thrift.TTableName;
 import org.apache.impala.util.AcidUtils;
-import org.apache.thrift.TException;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
@@ -1160,32 +1155,7 @@ public class MetastoreEvents {
      */
     @Override
     public void process() {
-      // if the database already exists in catalog, by definition, it is a later version
-      // of the database since metastore will not allow it be created if it was already
-      // existing at the time of creation. In such case, it is safe to assume that the
-      // already existing database in catalog is a later version with the same name and
-      // this event can be ignored
-      if (catalogOpExecutor_.addDbIfNotExists(dbName_, createdDatabase_)) {
-        infoLog("Successfully added database {}", dbName_);
-      } else {
-        infoLog("Database {} already exists", dbName_);
-      }
-    }
-
-    @Override
-    public boolean isRemovedAfter(List<MetastoreEvent> events) {
-      Preconditions.checkNotNull(events);
-      for (MetastoreEvent event : events) {
-        if (event.eventType_.equals(MetastoreEventType.DROP_DATABASE)) {
-          DropDatabaseEvent dropDatabaseEvent = (DropDatabaseEvent) event;
-          if (dbName_.equalsIgnoreCase(dropDatabaseEvent.dbName_)) {
-            infoLog("Found database {} is removed later in event {} of type {} ", dbName_,
-                dropDatabaseEvent.eventId_, dropDatabaseEvent.eventType_);
-            return true;
-          }
-        }
-      }
-      return false;
+      catalogOpExecutor_.addDbIfNotRemovedLater(eventId_, dbName_, createdDatabase_);
     }
   }
 
