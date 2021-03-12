@@ -39,6 +39,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
+import javax.annotation.Nullable;
 import org.apache.commons.collections.MapUtils;
 import org.apache.hadoop.fs.RemoteIterator;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
@@ -1952,15 +1953,21 @@ public class CatalogServiceCatalog extends Catalog {
     return startVersion;
   }
 
+  public Db addDb(String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
+    return addDb(dbName, msDb, -1);
+  }
+
   /**
    * Adds a database name to the metadata cache and returns the database's
    * new Db object. Used by CREATE DATABASE statements.
    */
-  public Db addDb(String dbName, org.apache.hadoop.hive.metastore.api.Database msDb) {
+  public Db addDb(String dbName, org.apache.hadoop.hive.metastore.api.Database msDb,
+      long eventId) {
     Db newDb = new Db(dbName, msDb);
     versionLock_.writeLock().lock();
     try {
       newDb.setCatalogVersion(incrementAndGetCatalogVersion());
+      newDb.setCreateEventId(eventId);
       addDb(newDb);
       return newDb;
     } finally {
@@ -2007,10 +2014,14 @@ public class CatalogServiceCatalog extends Catalog {
     deleteLog_.addRemovedObject(db.toTCatalogObject());
   }
 
+  public Table addIncompleteTable(String dbName, String tblName) {
+    return addIncompleteTable(dbName, tblName, -1L);
+  }
+
   /**
    * Adds a table with the given name to the catalog and returns the new table.
    */
-  public Table addIncompleteTable(String dbName, String tblName, long tblId) {
+  public Table addIncompleteTable(String dbName, String tblName, long createEventId) {
     versionLock_.writeLock().lock();
     try {
       // IMPALA-9211: get db object after holding the writeLock in case of getting stale
@@ -2024,8 +2035,9 @@ public class CatalogServiceCatalog extends Catalog {
         existingTbl.setCatalogVersion(incrementAndGetCatalogVersion());
         deleteLog_.addRemovedObject(existingTbl.toMinimalTCatalogObject());
       }
-      Table incompleteTable = IncompleteTable.createUninitializedTable(db, tblName, tblId);
+      Table incompleteTable = IncompleteTable.createUninitializedTable(db, tblName);
       incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
+      incompleteTable.setCreateEventId(createEventId);
       db.addTable(incompleteTable);
       return db.getTable(tblName);
     } finally {
@@ -2087,7 +2099,7 @@ public class CatalogServiceCatalog extends Catalog {
         return tbl;
       }
       previousCatalogVersion = tbl.getCatalogVersion();
-      loadReq = tableLoadingMgr_.loadAsync(tableName, reason);
+      loadReq = tableLoadingMgr_.loadAsync(tableName, tbl.getCreateEventId(), reason);
     } finally {
       versionLock_.readLock().unlock();
     }
@@ -2256,42 +2268,7 @@ public class CatalogServiceCatalog extends Catalog {
       if (oldTable == null) return Pair.create(null, null);
       return Pair.create(oldTable,
           addIncompleteTable(newTableName.getDb_name(), newTableName.getTable_name(),
-              oldTable.getMetaStoreTable().getId()));
-    } finally {
-      versionLock_.writeLock().unlock();
-    }
-  }
-
-  /**
-   * Renames the table by atomically removing oldTable and adding the newTable.
-   * @return true if oldTable was removed and newTable was added, false if oldTable or
-   * either of oldDb or newDb is not in catalog.
-   */
-  public boolean renameTableIfExists(TTableName oldTableName,
-      TTableName newTableName) {
-    boolean tableRenamed = false;
-    versionLock_.writeLock().lock();
-    try {
-      Db oldDb = getDb(oldTableName.db_name);
-      Db newDb = getDb(newTableName.db_name);
-      if (oldDb != null && newDb != null) {
-        Table existingTable = removeTable(oldTableName.db_name, oldTableName.table_name);
-        // Add the newTable only if oldTable existed.
-        if (existingTable != null) {
-          if (existingTable instanceof HdfsTable) {
-            // Add the old instance to the deleteLog_ so we can send isDeleted updates for
-            // its partitions.
-            existingTable.setCatalogVersion(incrementAndGetCatalogVersion());
-            deleteLog_.addRemovedObject(existingTable.toMinimalTCatalogObject());
-          }
-          Table incompleteTable = IncompleteTable.createUninitializedTable(newDb,
-              newTableName.getTable_name());
-          incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
-          newDb.addTable(incompleteTable);
-          tableRenamed = true;
-        }
-      }
-      return tableRenamed;
+              oldTable.getCreateEventId()));
     } finally {
       versionLock_.writeLock().unlock();
     }
@@ -2477,7 +2454,7 @@ public class CatalogServiceCatalog extends Catalog {
     // any existing entry. The metadata for the table will be loaded lazily, on the
     // on the next access to the table.
     Preconditions.checkNotNull(msTbl);
-    Table newTable = addIncompleteTable(dbName, tblName, msTbl.getId());
+    Table newTable = addIncompleteTable(dbName, tblName);
     Preconditions.checkNotNull(newTable);
     if (loadInBackground_) {
       tableLoadingMgr_.backgroundLoad(new TTableName(dbName.toLowerCase(),
@@ -2492,55 +2469,6 @@ public class CatalogServiceCatalog extends Catalog {
           addedDb.getCatalogVersion() < newTable.getCatalogVersion());
     }
     return newTable.toTCatalogObject();
-  }
-
-  /**
-   * Invalidate the table if it exists by overwriting existing entry by a Incomplete
-   * Table.
-   * @return null if the table does not exist else return the invalidated table
-   */
-  public Table invalidateTableIfExists(String dbName, String tblName) {
-    Table incompleteTable;
-    versionLock_.writeLock().lock();
-    try {
-      Db db = getDb(dbName);
-      if (db == null) return null;
-      if (!db.containsTable(tblName)) return null;
-      incompleteTable = IncompleteTable.createUninitializedTable(db, tblName);
-      incompleteTable.setCatalogVersion(incrementAndGetCatalogVersion());
-      db.addTable(incompleteTable);
-    } finally {
-      versionLock_.writeLock().unlock();
-    }
-    if (loadInBackground_) {
-      tableLoadingMgr_.backgroundLoad(
-          new TTableName(dbName.toLowerCase(), tblName.toLowerCase()));
-    }
-    return incompleteTable;
-  }
-
-  /**
-   * Refresh partition if it exists.
-   *
-   * @return true if partition was reloaded, else false.
-   * @throws CatalogException if partition reload threw an error.
-   * @throws DatabaseNotFoundException if Db doesn't exist.
-   * @throws TableNotFoundException if table doesn't exist.
-   * @throws TableNotLoadedException if table is not loaded in Catalog.
-   */
-  public boolean reloadPartitionIfExists(String dbName, String tblName,
-      List<TPartitionKeyValue> tPartSpec, String reason) throws CatalogException {
-    Table table = getTable(dbName, tblName);
-    if (table == null) {
-      throw new TableNotFoundException(dbName + "." + tblName + " not found");
-    }
-    if (table instanceof IncompleteTable) {
-      throw new TableNotLoadedException(dbName + "." + tblName + " is not loaded");
-    }
-    Reference<Boolean> wasPartitionRefreshed = new Reference<>(false);
-    reloadPartition(table, tPartSpec, wasPartitionRefreshed,
-        CatalogObject.ThriftObjectType.NONE, reason);
-    return wasPartitionRefreshed.getRef();
   }
 
   /**
@@ -2889,42 +2817,50 @@ public class CatalogServiceCatalog extends Catalog {
       String partitionName = hdfsPartition == null
           ? HdfsTable.constructPartitionName(partitionSpec)
           : hdfsPartition.getPartitionName();
-      LOG.info(String.format("Refreshing partition metadata: %s %s (%s)",
-          hdfsTable.getFullName(), partitionName, reason));
-      try (MetaStoreClient msClient = getMetaStoreClient()) {
-        org.apache.hadoop.hive.metastore.api.Partition hmsPartition = null;
-        try {
-          hmsPartition = msClient.getHiveClient().getPartition(
-              hdfsTable.getDb().getName(), hdfsTable.getName(), partitionName);
-        } catch (NoSuchObjectException e) {
-          // If partition does not exist in Hive Metastore, remove it from the
-          // catalog
-          if (hdfsPartition != null) {
-            hdfsTable.dropPartition(partitionSpec);
-            hdfsTable.setCatalogVersion(newCatalogVersion);
-            // non-existing partition was dropped from catalog, so we mark it as refreshed
-            wasPartitionReloaded.setRef(true);
-          } else {
-            LOG.info(String.format("Partition metadata for %s was not refreshed since "
-                    + "it does not exist in metastore anymore",
-                hdfsTable.getFullName() + " " + partitionName));
-          }
-          return hdfsTable.toTCatalogObject(resultType);
-        } catch (Exception e) {
-          throw new CatalogException("Error loading metadata for partition: "
-              + hdfsTable.getFullName() + " " + partitionName, e);
-        }
-        hdfsTable.reloadPartition(msClient.getHiveClient(), hdfsPartition, hmsPartition);
-      }
-      hdfsTable.setCatalogVersion(newCatalogVersion);
-      wasPartitionReloaded.setRef(true);
-      LOG.info(String.format("Refreshed partition metadata: %s %s",
-          hdfsTable.getFullName(), partitionName));
-      return hdfsTable.toTCatalogObject(resultType);
+      return reloadHdfsPartition(hdfsTable, partitionName, wasPartitionReloaded,
+          resultType, reason, newCatalogVersion, hdfsPartition);
     } finally {
       Preconditions.checkState(!versionLock_.isWriteLockedByCurrentThread());
       tbl.releaseWriteLock();
     }
+  }
+
+  public TCatalogObject reloadHdfsPartition(HdfsTable hdfsTable, String partitionName,
+      Reference<Boolean> wasPartitionReloaded, CatalogObject.ThriftObjectType resultType,
+      String reason, long newCatalogVersion, @Nullable HdfsPartition hdfsPartition)
+      throws CatalogException {
+    LOG.info(String.format("Refreshing partition metadata: %s %s (%s)",
+        hdfsTable.getFullName(), partitionName, reason));
+    try (MetaStoreClient msClient = getMetaStoreClient()) {
+      org.apache.hadoop.hive.metastore.api.Partition hmsPartition = null;
+      try {
+        hmsPartition = msClient.getHiveClient().getPartition(
+            hdfsTable.getDb().getName(), hdfsTable.getName(), partitionName);
+      } catch (NoSuchObjectException e) {
+        // If partition does not exist in Hive Metastore, remove it from the
+        // catalog
+        if (hdfsPartition != null) {
+          hdfsTable.dropPartition(hdfsPartition);
+          hdfsTable.setCatalogVersion(newCatalogVersion);
+          // non-existing partition was dropped from catalog, so we mark it as refreshed
+          wasPartitionReloaded.setRef(true);
+        } else {
+          LOG.info(String.format("Partition metadata for %s was not refreshed since "
+                  + "it does not exist in metastore anymore",
+              hdfsTable.getFullName() + " " + partitionName));
+        }
+        return hdfsTable.toTCatalogObject(resultType);
+      } catch (Exception e) {
+        throw new CatalogException("Error loading metadata for partition: "
+            + hdfsTable.getFullName() + " " + partitionName, e);
+      }
+      hdfsTable.reloadPartition(msClient.getHiveClient(), hdfsPartition, hmsPartition);
+    }
+    hdfsTable.setCatalogVersion(newCatalogVersion);
+    wasPartitionReloaded.setRef(true);
+    LOG.info(String.format("Refreshed partition metadata: %s %s",
+        hdfsTable.getFullName(), partitionName));
+    return hdfsTable.toTCatalogObject(resultType);
   }
 
   public CatalogDeltaLog getDeleteLog() { return deleteLog_; }

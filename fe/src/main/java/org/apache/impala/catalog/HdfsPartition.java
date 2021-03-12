@@ -682,6 +682,8 @@ public class HdfsPartition extends CatalogObjectImpl
   // it's not used in coordinators.
   private final InFlightEvents inFlightEvents_;
 
+  private final long createEventId_;
+
   private HdfsPartition(HdfsTable table, long id, long prevId, String partName,
       List<LiteralExpr> partitionKeyValues, HdfsStorageDescriptor fileFormatDescriptor,
       @Nonnull ImmutableList<byte[]> encodedFileDescriptors,
@@ -691,7 +693,7 @@ public class HdfsPartition extends CatalogObjectImpl
       boolean isMarkedCached, TAccessLevel accessLevel, Map<String, String> hmsParameters,
       CachedHmsPartitionDescriptor cachedMsPartitionDescriptor,
       byte[] partitionStats, boolean hasIncrementalStats, long numRows, long writeId,
-      InFlightEvents inFlightEvents) {
+      InFlightEvents inFlightEvents, long createEventId) {
     table_ = table;
     id_ = id;
     prevId_ = prevId;
@@ -710,12 +712,15 @@ public class HdfsPartition extends CatalogObjectImpl
     numRows_ = numRows;
     writeId_ = writeId;
     inFlightEvents_ = inFlightEvents;
+    createEventId_ = createEventId;
     if (partName == null && id_ != CatalogObjectsConstants.PROTOTYPE_PARTITION_ID) {
       partName_ = FeCatalogUtils.getPartitionName(this);
     } else {
       partName_ = partName;
     }
   }
+
+  public long getCreateEventId() { return createEventId_; }
 
   @Override // FeFsPartition
   public HdfsStorageDescriptor getInputFormatDescriptor() {
@@ -844,7 +849,12 @@ public class HdfsPartition extends CatalogObjectImpl
     Preconditions.checkState(table_.isWriteLockedByCurrentThread(),
         "removeFromVersionsForInflightEvents called without holding the table lock on "
             + "partition " + getPartitionName() + " of table " + table_.getFullName());
-    return inFlightEvents_.remove(isInsertEvent, versionNumber);
+    boolean ret = inFlightEvents_.remove(isInsertEvent, versionNumber);
+    if (!ret) {
+      LOG.info("VIHANG-DEBUG: Remove failed for {}: {}", versionNumber,
+          inFlightEvents_.print());
+    }
+    return ret;
   }
 
   /**
@@ -858,12 +868,15 @@ public class HdfsPartition extends CatalogObjectImpl
     Preconditions.checkState(table_.isWriteLockedByCurrentThread(),
         "addToVersionsForInflightEvents called without holding the table lock on "
             + "partition " + getPartitionName() + " of table " + table_.getFullName());
-    if (!inFlightEvents_.add(isInsertEvent, versionNumber)) {
+    boolean added =inFlightEvents_.add(isInsertEvent, versionNumber);
+    if (!added) {
       LOG.warn(String.format("Could not add %s version to the partition %s of table %s. "
           + "This could cause unnecessary refresh of the partition when the event is"
           + "received by the Events processor.", versionNumber, getPartitionName(),
           getTable().getFullName()));
     }
+    LOG.info("VIHANG-DEBUG: {} {} to inflight list {}",
+        (added ? "Added" : "Could not add"), versionNumber, inFlightEvents_.print());
   }
 
   @Override // FeFsPartition
@@ -1126,6 +1139,7 @@ public class HdfsPartition extends CatalogObjectImpl
     private boolean hasIncrementalStats_ = false;
     private long numRows_ = -1;
     private long writeId_ = -1L;
+    private long createEventId_ = -1L;
     private InFlightEvents inFlightEvents_ = new InFlightEvents(20);
 
     @Nullable
@@ -1186,11 +1200,16 @@ public class HdfsPartition extends CatalogObjectImpl
           fileFormatDescriptor_, encodedFileDescriptors_, encodedInsertFileDescriptors_,
           encodedDeleteFileDescriptors_, location_, isMarkedCached_, accessLevel_,
           hmsParameters_, cachedMsPartitionDescriptor_, partitionStats_,
-          hasIncrementalStats_, numRows_, writeId_, inFlightEvents_);
+          hasIncrementalStats_, numRows_, writeId_, inFlightEvents_, createEventId_);
     }
 
     public Builder setId(long id) {
       id_ = id;
+      return this;
+    }
+
+    public Builder setCreateEventId(long eventId) {
+      createEventId_ = eventId;
       return this;
     }
 
@@ -1479,8 +1498,12 @@ public class HdfsPartition extends CatalogObjectImpl
           MetastoreEventPropertyKey.CATALOG_VERSION.getKey())) {
         return;
       }
-      inFlightEvents_.add(false, Long.parseLong(
+      boolean added = inFlightEvents_.add(false, Long.parseLong(
           hmsParameters_.get(MetastoreEventPropertyKey.CATALOG_VERSION.getKey())));
+      LOG.info("VIHANG-DEBUG: {} {} to inflight events {}",
+          (added ? "Added" : "Could not add"), Long.parseLong(
+              hmsParameters_.get(MetastoreEventPropertyKey.CATALOG_VERSION.getKey())),
+          inFlightEvents_.print());
     }
 
     private List<FileDescriptor> fdsFromThrift(List<THdfsFileDesc> tFileDescs) {

@@ -546,6 +546,15 @@ public class HdfsTable extends Table implements FeFsTable {
     return Utils.getPartitionFromThriftPartitionSpec(table, partitionKeyValues);
   }
 
+  public HdfsPartition getPartition(List<LiteralExpr> partValues) {
+    // Get the list of partition values of existing partitions in Hive Metastore.
+    Map<List<LiteralExpr>, HdfsPartition> existingPartitions = Maps.newHashMap();
+    for (HdfsPartition partition: partitionMap_.values()) {
+      existingPartitions.put(partition.getPartitionValues(), partition);
+    }
+    return existingPartitions.get(partValues);
+  }
+
   /**
    * Gets the HdfsPartition matching the Thrift version of the partition spec.
    * Returns null if no match was found.
@@ -848,6 +857,26 @@ public class HdfsTable extends Table implements FeFsTable {
         .collect(Collectors.toList());
   }
 
+  public List<HdfsPartition> createAndLoadPartitions(IMetaStoreClient client,
+      Map<org.apache.hadoop.hive.metastore.api.Partition, Long> msPartitionsToEventId)
+      throws CatalogException {
+    List<HdfsPartition.Builder> addedPartBuilders = new ArrayList<>();
+    List<Partition> msPartitions = new ArrayList<>(msPartitionsToEventId.keySet());
+    FsPermissionCache permCache = preloadPermissionsCache(msPartitions);
+    for (org.apache.hadoop.hive.metastore.api.Partition partition: msPartitions) {
+      HdfsPartition.Builder partBuilder = createPartitionBuilder(partition.getSd(),
+          partition, permCache);
+      long eventId = Preconditions.checkNotNull(msPartitionsToEventId.get(partition));
+      partBuilder.setCreateEventId(eventId);
+      Preconditions.checkNotNull(partBuilder);
+      addedPartBuilders.add(partBuilder);
+    }
+    loadFileMetadataForPartitions(client, addedPartBuilders, /*isRefresh=*/false);
+    return addedPartBuilders.stream()
+        .map(HdfsPartition.Builder::build)
+        .collect(Collectors.toList());
+  }
+
   /**
    * Creates a new HdfsPartition.Builder from a specified StorageDescriptor and an HMS
    * partition object.
@@ -1055,7 +1084,7 @@ public class HdfsTable extends Table implements FeFsTable {
     return partition;
   }
 
-  private HdfsPartition dropPartition(HdfsPartition partition) {
+  public HdfsPartition dropPartition(HdfsPartition partition) {
     return dropPartition(partition, true);
   }
 
@@ -2372,6 +2401,24 @@ public class HdfsTable extends Table implements FeFsTable {
     }
   }
 
+  public List<LiteralExpr> getTypeCompatiblePartValues(List<String> values)
+      throws UnsupportedEncodingException {
+    List<LiteralExpr> result = new ArrayList<>();
+    List<Column> partitionColumns = getClusteringColumns();
+    Preconditions.checkState(partitionColumns.size() == values.size());
+    for (int i=0; i<partitionColumns.size(); i++) {
+      Pair<String, LiteralExpr> pair = getPartitionExprFromValue(values.get(i),
+          partitionColumns.get(i).getType());
+      if (pair == null) {
+        LOG.error("Could not get a type compatible value for key {} with value {}", i,
+            values.get(i));
+        return null;
+      }
+      result.add(pair.second);
+    }
+    return result;
+  }
+
   /**
    * Checks that the last component of 'path' is of the form "<partitionkey>=<v>"
    * where 'v' is a type-compatible value from the domain of the 'partitionKey' column.
@@ -2388,9 +2435,14 @@ public class HdfsTable extends Table implements FeFsTable {
     Column column = getColumn(partName[0]);
     Preconditions.checkNotNull(column);
     Type type = column.getType();
+    return getPartitionExprFromValue(partName[1], type);
+  }
+
+  private Pair<String, LiteralExpr> getPartitionExprFromValue(String s, Type type)
+      throws UnsupportedEncodingException {
     LiteralExpr expr = null;
     // URL decode the partition value since it may contain encoded URL.
-    String value = URLDecoder.decode(partName[1], StandardCharsets.UTF_8.name());
+    String value = URLDecoder.decode(s, StandardCharsets.UTF_8.name());
     if (!value.equals(getNullPartitionKeyValue())) {
       try {
         expr = LiteralExpr.createFromUnescapedStr(value, type);

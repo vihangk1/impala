@@ -211,6 +211,12 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   public static final String NUMBER_OF_TABLE_REFRESHES = "tables-refreshed";
   // number of times events processor refreshed a partition
   public static final String NUMBER_OF_PARTITION_REFRESHES = "partitions-refreshed";
+  public static final String NUMBER_OF_TABLES_ADDED = "tables-added";
+  public static final String NUMBER_OF_TABLES_REMOVED = "tables-removed";
+  public static final String NUMBER_OF_DATABASES_ADDED = "databases-added";
+  public static final String NUMBER_OF_DATABASES_REMOVED = "databases-removed";
+  public static final String NUMBER_OF_PARTITIONS_ADDED = "partitions-added";
+  public static final String NUMBER_OF_PARTITIONS_REMOVED = "partitions-removed";
 
   // possible status of event processor
   public enum EventProcessorStatus {
@@ -318,6 +324,12 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     metrics_.addCounter(NUMBER_OF_SELF_EVENTS);
     metrics_.addCounter(NUMBER_OF_TABLE_REFRESHES);
     metrics_.addCounter(NUMBER_OF_PARTITION_REFRESHES);
+    metrics_.addCounter(NUMBER_OF_TABLES_ADDED);
+    metrics_.addCounter(NUMBER_OF_TABLES_REMOVED);
+    metrics_.addCounter(NUMBER_OF_DATABASES_ADDED);
+    metrics_.addCounter(NUMBER_OF_DATABASES_REMOVED);
+    metrics_.addCounter(NUMBER_OF_PARTITIONS_ADDED);
+    metrics_.addCounter(NUMBER_OF_PARTITIONS_REMOVED);
   }
 
   /**
@@ -696,8 +708,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
     return instance;
   }
 
-  @VisibleForTesting
-  public MetastoreEventFactory getMetastoreEventFactory() {
+  @Override
+  public MetastoreEventFactory getEventsFactory() {
     return metastoreEventFactory_;
   }
 

@@ -25,6 +25,7 @@ from tests.common.environ import HIVE_MAJOR_VERSION
 from tests.common.skip import SkipIfS3, SkipIfABFS, SkipIfADLS, SkipIfIsilon, SkipIfLocal
 from tests.util.event_processor_utils import EventProcessorUtils
 from tests.util.filesystem_utils import WAREHOUSE
+from time import sleep
 
 
 @SkipIfS3.hive
@@ -199,27 +200,31 @@ class TestEventProcessing(CustomClusterTestSuite):
       impalad_args="--use_local_catalog=true",
       catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
       cluster_size=1)
-  def test_create_drop_table_local(self, unique_database):
-    # self.__run_create_drop_test(unique_database)
-    #self.__run_create_drop_test(unique_database, "database")
+  def test_local_catalog_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
     self.__run_create_drop_test(unique_database, "partition")
 
   @pytest.mark.execute_serially
   @CustomClusterTestSuite.with_args(
     catalogd_args="--hms_event_polling_interval_s=1",
     cluster_size=1)
-  def test_create_drop_table(self, unique_database):
-    self.__run_create_drop_test(unique_database)
+  def test_create_drop_events(self, unique_database):
     self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
     self.__run_create_drop_test(unique_database, "partition")
 
-  def __run_create_drop_test(self, db, type="table"):
-    NUM_ITERS = 1000
+  def __run_create_drop_test(self, db, type):
+    NUM_ITERS = 200
+    create_metric_name = None
+    removed_metric_name = None
     if type == "table":
       queries = [
         "create table {0}.test_{1} (i int)".format(db, 1),
         "drop table {0}.test_{1}".format(db, 1)
       ]
+      create_metric_name = "tables-added"
+      removed_metric_name = "tables-removed"
     elif type == "database":
       self.execute_query_expect_success(self.create_impala_client(),
         "drop database if exists {0}".format("test_create_drop_db"))
@@ -227,6 +232,8 @@ class TestEventProcessing(CustomClusterTestSuite):
         "create database {db}".format(db="test_create_drop_db"),
         "drop database {db}".format(db="test_create_drop_db")
       ]
+      create_metric_name = "databases-added"
+      removed_metric_name = "databases-removed"
     else:
       tbl_name = "test_create_drop_partition"
       self.execute_query_expect_success(self.create_impala_client(),
@@ -236,6 +243,17 @@ class TestEventProcessing(CustomClusterTestSuite):
         "alter table {db}.{tbl} add partition (p=1)".format(db=db, tbl=tbl_name),
         "alter table {db}.{tbl} drop partition (p=1)".format(db=db, tbl=tbl_name)
       ]
+      create_metric_name = "partitions-added"
+      removed_metric_name = "partitions-removed"
+
+    # get the metric before values
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_before = EventProcessorUtils.\
+      get_event_processor_metric('events-skipped', 0)
     for iter in xrange(NUM_ITERS):
       for q in queries:
         try:
@@ -244,7 +262,19 @@ class TestEventProcessing(CustomClusterTestSuite):
         except:
           print("Failed in {} iterations".format(iter))
           raise
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_after = EventProcessorUtils. \
+      get_event_processor_metric('events-skipped', 0)
     assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+    # None of the queries above should actually trigger a add/remove object from events
+    assert int(create_metric_val_after) == int(create_metric_val_before)
+    assert int(removed_metric_val_after) == int(removed_metric_val_before)
+    # each query set generates 2 events and both of them should be skipped
+    assert int(events_skipped_after) == NUM_ITERS*2 + int(events_skipped_before)
 
   @pytest.mark.xfail(run=False, reason="This is failing due to HIVE-23995")
   @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")

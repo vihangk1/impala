@@ -18,6 +18,7 @@
 package org.apache.impala.catalog.events;
 
 import org.apache.impala.catalog.CatalogException;
+import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventFactory;
 import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
@@ -78,4 +79,6 @@ public interface ExternalEventsProcessor {
    * create/drop events at table and database level.
    */
   void setCatalogOpExecutor(CatalogOpExecutor catalogOpExecutor);
+
+  MetastoreEventFactory getEventsFactory() throws MetastoreNotificationException;
 }
