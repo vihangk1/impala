@@ -121,6 +121,7 @@ import org.apache.impala.catalog.Type;
 import org.apache.impala.catalog.View;
 import org.apache.impala.catalog.events.DeleteEventLog;
 import org.apache.impala.catalog.events.MetastoreEvents.AddPartitionEvent;
+import org.apache.impala.catalog.events.MetastoreEvents.AlterTableEvent;
 import org.apache.impala.catalog.events.MetastoreEvents.CreateDatabaseEvent;
 import org.apache.impala.catalog.events.MetastoreEvents.CreateTableEvent;
 import org.apache.impala.catalog.events.MetastoreEvents.DropDatabaseEvent;
@@ -223,6 +224,7 @@ import org.apache.impala.util.IcebergUtil;
 import org.apache.impala.util.KuduUtil;
 import org.apache.impala.util.MetaStoreUtil;
 import org.apache.impala.util.MetaStoreUtil.TableInsertEventInfo;
+import org.apache.kudu.client.Delete;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -701,6 +703,7 @@ public class CatalogOpExecutor {
           tblAddedLater.setRef(true);
           return false;
         }
+        //TODO(Vihang) this block can be removed.
         if (!(tblToBeRemoved instanceof IncompleteTable)) {
           // sanity check; the table id in the event should match with the table id in
           // the catalog. Unfortunately, table id's are only stored for loaded tables
@@ -778,16 +781,43 @@ public class CatalogOpExecutor {
       throws CatalogException {
     synchronized (metastoreDdlLock_) {
       Reference<Boolean> tableAddedLater = new Reference<>();
-      boolean tblRemoved = removeTableIfNotAddedLater(eventId_, tableBefore_,
-          tableAddedLater);
-      oldTblRemoved.setRef(tblRemoved);
-      if (!tblRemoved) {
-        LOG.debug("EventId: {} before table not removed since {}", eventId_,
-            (tableAddedLater.getRef() ? " it is added later"
-                : " it doesn't exist anymore"));
+      Table tblBefore = null;
+      try {
+        tblBefore = catalog_
+            .getTable(tableBefore_.getDbName(), tableBefore_.getTableName());
+      } catch (DatabaseNotFoundException e) {
+        // ignore if the database is not found; we consider it same as table
+        // not found and we don't remove it.
       }
-      boolean tblAdded = addTableIfNotRemovedLater(eventId_, tableAfter_);
-      newTblAdded.setRef(tblAdded);
+      boolean beforeTblLocked = false;
+      try {
+        if (tblBefore != null) {
+          // if the before table exists, then we must take a lock on it so that
+          // we block any other concurrent operations on it.
+          tryWriteLock(tblBefore, "ALTER_TABLE RENAME EVENT");
+          beforeTblLocked = true;
+          catalog_.getLock().writeLock().unlock();
+        }
+        boolean tblRemoved = removeTableIfNotAddedLater(eventId_, tableBefore_,
+            tableAddedLater);
+        oldTblRemoved.setRef(tblRemoved);
+        if (!tblRemoved) {
+          LOG.debug("EventId: {} before table not removed since {}", eventId_,
+              (tableAddedLater.getRef() ? " it is added later"
+                  : " it doesn't exist anymore"));
+        }
+        boolean tblAdded = addTableIfNotRemovedLater(eventId_, tableAfter_);
+        newTblAdded.setRef(tblAdded);
+      } catch (InternalException e) {
+        throw new CatalogException(
+            "Unable to process rename table event " + eventId_, e);
+      } finally {
+        UnlockWriteLockIfErronouslyLocked();
+        if (beforeTblLocked) {
+          tblBefore.releaseWriteLock();
+        }
+        eventLog_.garbageCollect(eventId_);
+      }
     }
   }
   /**
@@ -1733,6 +1763,26 @@ public class CatalogOpExecutor {
       Preconditions.checkState(event instanceof CreateTableEvent);
       return new Pair<>(events.get(0).getEventId(),
           ((CreateTableEvent) event).getTable());
+    } catch (MetastoreNotificationException e) {
+      throw new CatalogException("Unable to create a metastore event", e);
+    }
+  }
+
+  private Pair<Long, Pair<org.apache.hadoop.hive.metastore.api.Table,
+      org.apache.hadoop.hive.metastore.api.Table>> getRenamedTableFromEvents(
+      List<NotificationEvent> events) throws CatalogException {
+    if (!catalog_.isEventProcessingActive()) {
+      return null;
+    }
+    Preconditions.checkState(events.size() == 1);
+    try {
+      MetastoreEvent event = catalog_
+          .getMetastoreEventProcessor().getEventsFactory().get(events.get(0));
+      Preconditions.checkState(event instanceof AlterTableEvent);
+      AlterTableEvent alterEvent = (AlterTableEvent) event;
+      Preconditions.checkState(alterEvent.isRename());
+      return new Pair<>(events.get(0).getEventId(),
+          new Pair<>(alterEvent.getBeforeTable(), alterEvent.getAfterTable()));
     } catch (MetastoreNotificationException e) {
       throw new CatalogException("Unable to create a metastore event", e);
     }
@@ -4068,7 +4118,13 @@ public class CatalogOpExecutor {
         oldTbl.getMetaStoreTable().deepCopy();
     msTbl.setDbName(newTableName.getDb());
     msTbl.setTableName(newTableName.getTbl());
-
+    long eventId = -1;
+    try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      eventId = getCurrentEventId(msClient);
+    } catch (TException e) {
+      throw new ImpalaRuntimeException(
+          String.format(HMS_RPC_ERROR_FORMAT_STR, "getNextNotification"), e);
+    }
     // If oldTbl is a synchronized Kudu table, rename the underlying Kudu table.
     boolean isSynchronizedKuduTable = (oldTbl instanceof KuduTable) &&
                                  KuduTable.isSynchronizedTable(msTbl);
@@ -4098,10 +4154,36 @@ public class CatalogOpExecutor {
             String.format(HMS_RPC_ERROR_FORMAT_STR, "alter_table"), e);
       }
     }
+    List<NotificationEvent> events = null;
+    try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      events = getNextMetastoreEvents(eventId, msClient, new NotificationFilter() {
+        @Override
+        public boolean accept(NotificationEvent notificationEvent) {
+          return "ALTER_TABLE".equals(notificationEvent.getEventType())
+              // the alter table event is generated on the renamed table
+              && msTbl.getDbName().equalsIgnoreCase(notificationEvent.getDbName())
+              && msTbl.getTableName().equalsIgnoreCase(notificationEvent.getTableName());
+        }
+      });
+    } catch (TException e) {
+      throw new ImpalaRuntimeException(
+          String.format(HMS_RPC_ERROR_FORMAT_STR, "getNextNotification"), e);
+    }
+    Pair<Long, Pair<org.apache.hadoop.hive.metastore.api.Table,
+        org.apache.hadoop.hive.metastore.api.Table>> renamedTable = getRenamedTableFromEvents(events);
     // Rename the table in the Catalog and get the resulting catalog object.
     // ALTER TABLE/VIEW RENAME is implemented as an ADD + DROP.
     Pair<Table, Table> result =
         catalog_.renameTable(tableName.toThrift(), newTableName.toThrift());
+    if (renamedTable != null) {
+      org.apache.hadoop.hive.metastore.api.Table tblBefore = renamedTable.second.first;
+      eventLog_.addRemovedObject(renamedTable.first, DeleteEventLog
+          .getTblKey(tblBefore.getCatName(), tblBefore.getDbName(),
+              tblBefore.getTableName()));
+      if (result.second != null) {
+        result.second.setCreateEventId(renamedTable.first);
+      }
+    }
     if (result.first == null || result.second == null) {
       // The rename succeeded in the HMS but failed in the catalog cache. The cache is in
       // an inconsistent state, but can likely be fixed by running "invalidate metadata".

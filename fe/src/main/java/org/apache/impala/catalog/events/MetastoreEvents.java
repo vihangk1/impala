@@ -899,6 +899,12 @@ public class MetastoreEvents {
               MetastoreEventPropertyKey.DISABLE_EVENT_HMS_SYNC.getKey()));
     }
 
+    public boolean isRename() { return isRename_; }
+
+    public Table getBeforeTable() { return tableBefore_; }
+
+    public Table getAfterTable() { return tableAfter_; }
+
     @Override
     protected SelfEventContext getSelfEventContext() {
       return new SelfEventContext(tableAfter_.getDbName(), tableAfter_.getTableName(),

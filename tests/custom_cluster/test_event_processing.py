@@ -197,32 +197,54 @@ class TestEventProcessing(CustomClusterTestSuite):
 
   @pytest.mark.execute_serially
   @CustomClusterTestSuite.with_args(
-      impalad_args="--use_local_catalog=true",
-      catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
-      cluster_size=1)
-  def test_local_catalog_create_drop_events(self, unique_database):
-    self.__run_create_drop_test(unique_database, "database")
-    self.__run_create_drop_test(unique_database, "table")
-    self.__run_create_drop_test(unique_database, "partition")
-
-  @pytest.mark.execute_serially
-  @CustomClusterTestSuite.with_args(
     catalogd_args="--hms_event_polling_interval_s=1",
     cluster_size=1)
   def test_create_drop_events(self, unique_database):
     self.__run_create_drop_test(unique_database, "database")
     self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
     self.__run_create_drop_test(unique_database, "partition")
 
-  def __run_create_drop_test(self, db, type):
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    impalad_args="--use_local_catalog=true",
+    catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_local_catalog_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
+
+  def __run_create_drop_test(self, db, type, rename=False, renameDb = False):
     NUM_ITERS = 200
-    create_metric_name = None
-    removed_metric_name = None
     if type == "table":
-      queries = [
-        "create table {0}.test_{1} (i int)".format(db, 1),
-        "drop table {0}.test_{1}".format(db, 1)
-      ]
+      if not rename:
+        queries = [
+          "create table {0}.test_{1} (i int)".format(db, 1),
+          "drop table {0}.test_{1}".format(db, 1)
+        ]
+      else:
+        db_1 = "{}_1".format(db)
+        if renameDb:
+          self.execute_query_expect_success(self.create_impala_client(),
+            "drop database if exists {0} cascade".format(db_1))
+          self.execute_query_expect_success(self.create_impala_client(),
+            "create database {0}".format(db_1))
+        self.execute_query_expect_success(self.create_impala_client(),
+          "create table if not exists {0}.rename_test_1 (i int)".format(db))
+        if renameDb:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db, db_1),
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db_1, db)
+          ]
+        else:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {0}.rename_test_2".format(db),
+            "alter table {0}.rename_test_2 rename to {0}.rename_test_1".format(db)
+          ]
       create_metric_name = "tables-added"
       removed_metric_name = "tables-removed"
     elif type == "database":
