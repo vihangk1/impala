@@ -1688,7 +1688,7 @@ public class CatalogOpExecutor {
             // behavior of showing no location in 'describe database' (IMPALA-7439).
             eventDbPair = new Pair<>(-1L, msClient.getHiveClient().getDatabase(dbName));
           }
-          newDb = catalog_.addDb(dbName, db, eventDbPair.first);
+          newDb = catalog_.addDb(dbName, eventDbPair.second, eventDbPair.first);
           addSummary(resp, "Database has been created.");
         } catch (AlreadyExistsException e) {
           if (!params.if_not_exists) {
