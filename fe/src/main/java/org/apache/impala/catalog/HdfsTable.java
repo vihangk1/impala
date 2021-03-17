@@ -41,6 +41,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -864,15 +865,18 @@ public class HdfsTable extends Table implements FeFsTable {
   }
 
   public List<HdfsPartition> createAndLoadPartitions(IMetaStoreClient client,
-      Map<org.apache.hadoop.hive.metastore.api.Partition, Long> msPartitionsToEventId)
+      List<Partition> partitions, Map<Partition, Long> msPartitionsToEventId)
       throws CatalogException {
     List<HdfsPartition.Builder> addedPartBuilders = new ArrayList<>();
-    List<Partition> msPartitions = new ArrayList<>(msPartitionsToEventId.keySet());
-    FsPermissionCache permCache = preloadPermissionsCache(msPartitions);
-    for (org.apache.hadoop.hive.metastore.api.Partition partition: msPartitions) {
+    FsPermissionCache permCache = preloadPermissionsCache(partitions);
+    for (org.apache.hadoop.hive.metastore.api.Partition partition: partitions) {
       HdfsPartition.Builder partBuilder = createPartitionBuilder(partition.getSd(),
           partition, permCache);
-      long eventId = Preconditions.checkNotNull(msPartitionsToEventId.get(partition));
+      if (!msPartitionsToEventId.containsKey(partition)) {
+        LOG.warn("Create event id for partition {} not found. Using -1.",
+            FileUtils.makePartName(getClusteringColNames(), partition.getValues()));
+      }
+      long eventId = msPartitionsToEventId.getOrDefault(partition, -1L);
       partBuilder.setCreateEventId(eventId);
       Preconditions.checkNotNull(partBuilder);
       addedPartBuilders.add(partBuilder);

@@ -17,18 +17,15 @@
 
 package org.apache.impala.catalog.events;
 
-import com.amazonaws.services.dynamodbv2.xspec.B;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 
-import java.sql.Ref;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map;
@@ -47,7 +44,6 @@ import org.apache.hadoop.hive.metastore.messaging.json.JSONAlterTableMessage;
 import org.apache.hadoop.hive.metastore.messaging.json.JSONCreateDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.json.JSONDropDatabaseMessage;
 import org.apache.hadoop.hive.metastore.messaging.json.JSONDropTableMessage;
-import org.apache.hadoop.hive.metastore.utils.FileUtils;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
@@ -305,6 +301,8 @@ public class MetastoreEvents {
       this.metastoreNotificationEvent_ = event;
       this.metrics_ = metrics;
     }
+
+    public long getEventId() { return eventId_; }
 
     public String getDbName() { return dbName_; }
 
@@ -1370,8 +1368,8 @@ public class MetastoreEvents {
               .addPartitionsIfNotRemovedLater(eventId_, dbName_, tblName_,
                   addedPartitions_, "ADD_PARTITION");
           if (numPartsAdded != 0) {
-            infoLog("Successfully added partitions to table {} in the event",
-                getFullyQualifiedTblName());
+            infoLog("Successfully added {} partitions to table {}",
+                numPartsAdded, getFullyQualifiedTblName());
             metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_PARTITIONS_ADDED)
                 .inc(numPartsAdded);
           } else {
@@ -1524,7 +1522,7 @@ public class MetastoreEvents {
           reloadTableFromCatalog("DROP_PARTITION", true);
         } else {
           int numPartsRemoved = catalogOpExecutor_
-              .dropIfNotAddedLater(eventId_, dbName_, tblName_, droppedPartitions_,
+              .removePartitionsIfNotAddedLater(eventId_, dbName_, tblName_, droppedPartitions_,
                   "DROP_PARTITION");
           if (numPartsRemoved > 0) {
             infoLog("{} partitions dropped from table {}", numPartsRemoved,
