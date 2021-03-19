@@ -865,18 +865,19 @@ public class HdfsTable extends Table implements FeFsTable {
   }
 
   public List<HdfsPartition> createAndLoadPartitions(IMetaStoreClient client,
-      List<Partition> partitions, Map<Partition, Long> msPartitionsToEventId)
+      List<Partition> partitions, Map<String, Long> msPartitionsToEventId)
       throws CatalogException {
     List<HdfsPartition.Builder> addedPartBuilders = new ArrayList<>();
     FsPermissionCache permCache = preloadPermissionsCache(partitions);
     for (org.apache.hadoop.hive.metastore.api.Partition partition: partitions) {
       HdfsPartition.Builder partBuilder = createPartitionBuilder(partition.getSd(),
           partition, permCache);
-      if (!msPartitionsToEventId.containsKey(partition)) {
-        LOG.warn("Create event id for partition {} not found. Using -1.",
-            FileUtils.makePartName(getClusteringColNames(), partition.getValues()));
+      String partName = FeCatalogUtils.getPartitionName(this, partition.getValues());
+      if (!msPartitionsToEventId
+          .containsKey(partName)) {
+        LOG.warn("Create event id for partition {} not found. Using -1.", partName);
       }
-      long eventId = msPartitionsToEventId.getOrDefault(partition, -1L);
+      long eventId = msPartitionsToEventId.getOrDefault(partName, -1L);
       partBuilder.setCreateEventId(eventId);
       Preconditions.checkNotNull(partBuilder);
       addedPartBuilders.add(partBuilder);

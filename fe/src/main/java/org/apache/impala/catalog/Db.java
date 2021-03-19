@@ -120,7 +120,7 @@ public class Db extends CatalogObjectImpl implements FeDb {
     functions_ = new HashMap<>();
   }
 
-  public long getCreatedEventId() { return createEventId_; }
+  public long getCreateEventId() { return createEventId_; }
 
   public void setCreateEventId(long eventId) {
     createEventId_ = eventId;

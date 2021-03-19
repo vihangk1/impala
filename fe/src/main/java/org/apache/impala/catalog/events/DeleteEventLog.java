@@ -5,20 +5,19 @@ import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import org.apache.hadoop.hive.common.FileUtils;
-import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.Database;
-import org.apache.hadoop.hive.metastore.api.MetaException;
 import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.impala.catalog.HdfsTable;
 
 public class DeleteEventLog {
 
   private SortedMap<Long, Object> eventLog_;
-  // key format for databases "DB:catalogName.DbName"
-  private static final String DB_KEY_FORMAT_STR = "DB:%s.%s";
-  // key format for tables "TBL:catalogName.DbName.tblName"
-  private static final String TBL_KEY_FORMAT_STR = "TBL:%s.%s.%s";
-  // key format for tables "TBL:catalogName.DbName.tblName"
+  //TODO add catalogName in this key when we support metastore catalogs
+  // key format for databases "DB:DbName"
+  private static final String DB_KEY_FORMAT_STR = "DB:%s";
+  //TODO add catalogName in this key when we support metastore catalogs
+  // key format for tables "TBL:DbName.tblName"
+  private static final String TBL_KEY_FORMAT_STR = "TBL:%s.%s";
   // TODO Add catalog name here.
   // key format for partitions "PART:FullTblName.partName"
   private static final String PART_KEY_FORMAT_STR = "PART:%s.%s";
@@ -57,22 +56,22 @@ public class DeleteEventLog {
     }
   }
 
-  public static String getDbKey(String catalogName, String dbName) {
+  public static String getDbKey(String dbName) {
     return String
-        .format(DB_KEY_FORMAT_STR, catalogName, dbName).toLowerCase();
+        .format(DB_KEY_FORMAT_STR, dbName).toLowerCase();
   }
 
-  public static String getTblKey(String catalogName, String dbName, String tblName) {
-    return String.format(TBL_KEY_FORMAT_STR, catalogName, dbName, tblName).toLowerCase();
+  public static String getTblKey(String dbName, String tblName) {
+    return String.format(TBL_KEY_FORMAT_STR, dbName, tblName).toLowerCase();
   }
 
   public static String getKey(Database database) {
-    return getDbKey(database.getCatalogName(), database.getName());
+    return getDbKey(database.getName());
   }
 
   public static String getKey(Table tbl) {
     return String
-        .format(TBL_KEY_FORMAT_STR, tbl.getCatName(), tbl.getDbName(), tbl.getTableName())
+        .format(TBL_KEY_FORMAT_STR, tbl.getDbName(), tbl.getTableName())
         .toLowerCase();
   }
 }
