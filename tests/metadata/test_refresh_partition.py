@@ -84,7 +84,8 @@ class TestRefreshPartition(ImpalaTestSuite):
     assert result.get_data().startswith("1\t1\t2"),\
         "Incorrect partition stats %s" % result.get_data()
 
-  def test_add_hive_partition_and_refresh(self, vector, unique_database):
+  def test_add_hive_partition_and_refresh(self, vector, unique_database,
+      cluster_properties):
     """
     Partition added in Hive can be viewed in Impala after refreshing
     partition.
@@ -96,15 +97,23 @@ class TestRefreshPartition(ImpalaTestSuite):
     assert [] == self.get_impala_partition_info(table_name, 'y', 'z')
     self.run_stmt_in_hive(
         'alter table %s add partition (y=333, z=5309)' % table_name)
-    # Make sure Impala can't see the partition yet
-    assert [] == self.get_impala_partition_info(table_name, 'y', 'z')
-    self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      # Wait for event processing and catalog update propagation.
+      EventProcessorUtils.wait_for_event_processing(self)
+    else:
+      # Make sure Impala can't see the partition yet
+      assert [] == self.get_impala_partition_info(table_name, 'y', 'z')
+      self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
     # Impala can see the partition
     assert [('333', '5309')] == self.get_impala_partition_info(table_name, 'y', 'z')
     # Impala's refresh didn't alter Hive's knowledge of the partition
     assert ['y=333/z=5309'] == self.hive_partition_names(table_name)
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
 
-  def test_drop_hive_partition_and_refresh(self, vector, unique_database):
+  def test_drop_hive_partition_and_refresh(self, vector, unique_database,
+      cluster_properties):
     """
     Partition dropped in Hive is removed in Impala as well after refreshing
     partition.
@@ -117,10 +126,15 @@ class TestRefreshPartition(ImpalaTestSuite):
         'alter table %s add partition (y=333, z=5309)' % table_name)
     assert [('333', '5309')] == self.get_impala_partition_info(table_name, 'y', 'z')
     self.run_stmt_in_hive(
-        'alter table %s drop partition (y=333, z=5309)' % table_name)
-    # Make sure Impala can still see the partition
-    assert [('333', '5309')] == self.get_impala_partition_info(table_name, 'y', 'z')
-    self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
+      'alter table %s drop partition (y=333, z=5309)' % table_name)
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      # Wait for event processing and catalog update propagation.
+      EventProcessorUtils.wait_for_event_processing(self)
+    else:
+      # Make sure Impala can still see the partition
+      assert [('333', '5309')] == self.get_impala_partition_info(table_name, 'y', 'z')
+      self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
     # Impala can see the partition is not there anymore
     assert [] == self.get_impala_partition_info(table_name, 'y', 'z')
     # Impala's refresh didn't alter Hive's knowledge of the partition
@@ -173,7 +187,7 @@ class TestRefreshPartition(ImpalaTestSuite):
     assert [('333', '5309')] == self.get_impala_partition_info(table_name, 'y', 'z')
     assert ['y=333/z=5309'] == self.hive_partition_names(table_name)
 
-  def test_remove_data_and_refresh(self, vector, unique_database):
+  def test_remove_data_and_refresh(self, vector, unique_database, cluster_properties):
     """
     Data removed through hive is visible in impala after refresh of partition.
     """
@@ -200,8 +214,14 @@ class TestRefreshPartition(ImpalaTestSuite):
     except ImpalaBeeswaxException as e:
       assert expected_error in str(e)
 
-    self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
-    result = self.client.execute("select count(*) from %s" % table_name)
+    if cluster_properties.is_event_polling_enabled():
+      assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+      # Once events are processed the table should have been automatically refreshed
+      EventProcessorUtils.wait_for_event_processing(self)
+      result = self.client.execute("select count(*) from %s" % table_name)
+    else:
+      self.client.execute('refresh %s partition (y=333, z=5309)' % table_name)
+      result = self.client.execute("select count(*) from %s" % table_name)
     assert result.data == [str('0')]
 
   def test_add_delete_data_to_hdfs_and_refresh(self, vector, unique_database):
