@@ -3903,6 +3903,7 @@ public class CatalogOpExecutor {
           skippedPartitions.add(partKeyVals);
         }
       }
+      droppedPartitions.removeAll(skippedPartitions);
       if (droppedPartitions.isEmpty()) {
         return 0;
       } else {
@@ -3910,7 +3911,6 @@ public class CatalogOpExecutor {
             "EventId: {} Skipping removal of {}/{} partitions since they don't exist or"
                 + "were created later in table {}.", eventId, skippedPartitions.size(),
             droppedPartitions.size(), table.getFullName());
-        droppedPartitions.removeAll(skippedPartitions);
       }
       List<List<TPartitionKeyValue>> allTPartKeyVals = Lists
           .newArrayListWithCapacity(droppedPartitions.size());

@@ -20,6 +20,8 @@
 from tests.common.impala_test_suite import ImpalaTestSuite
 from tests.common.impala_cluster import ImpalaCluster
 from tests.verifiers.metric_verifier import MetricVerifier
+from tests.util.event_processor_utils import EventProcessorUtils
+
 
 class TestValidateMetrics(ImpalaTestSuite):
   """Verify metric values from the debug webpage.
@@ -52,3 +54,9 @@ class TestValidateMetrics(ImpalaTestSuite):
     for impalad in ImpalaCluster.get_e2e_test_cluster().impalads:
       verifier = MetricVerifier(impalad.service)
       verifier.wait_for_backend_admission_control_state()
+
+  def test_event_processor_is_active(self):
+    """Test that makes sure that the events processor is in ACTIVE state
+    after all the tests have run."""
+    EventProcessorUtils.wait_for_event_processing(self)
+    assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
