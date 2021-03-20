@@ -3696,6 +3696,11 @@ public class CatalogOpExecutor {
               });
           Map<Partition, Long> partitionToEventSubMap = Maps.newHashMap();
           getPartitionsFromEvent(events, partitionToEventSubMap);
+          // set the eventId to last one which we received so the we fetch the next
+          // set of events correctly
+          if (!events.isEmpty()) {
+            eventId = events.get(events.size() - 1).getEventId();
+          }
           if (partitionToEventSubMap.isEmpty()) {
             // if partitions couldn't be fetched from events, use the one returned by
             // add_partitions call above.
