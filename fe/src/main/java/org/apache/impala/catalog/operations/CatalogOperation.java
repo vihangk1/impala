@@ -9,6 +9,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,12 +17,18 @@ import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.impala.analysis.AlterTableSortByStmt;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.catalog.CatalogServiceCatalog;
+import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.Db;
+import org.apache.impala.catalog.FeCatalogUtils;
+import org.apache.impala.catalog.FeFsPartition;
+import org.apache.impala.catalog.FeFsTable;
+import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.HdfsPartition;
 import org.apache.impala.catalog.HdfsPartition.Builder;
 import org.apache.impala.catalog.HdfsTable;
@@ -52,6 +59,7 @@ import org.apache.impala.thrift.TResultSetMetadata;
 import org.apache.impala.thrift.TSortingOrder;
 import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.AcidUtils.TblTransaction;
+import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.impala.util.IcebergUtil;
 import org.apache.impala.util.MetaStoreUtil;
 import org.apache.thrift.TException;
@@ -117,7 +125,7 @@ public abstract class CatalogOperation {
 
   protected abstract void before() throws ImpalaException;
 
-  protected abstract void after();
+  protected abstract void after() throws ImpalaException;
 
   public void execute() throws ImpalaException {
     try {
@@ -133,6 +141,131 @@ public abstract class CatalogOperation {
       }
     } finally {
       after();
+    }
+  }
+
+  /**
+   * Drops all table and partition stats from this table in the HMS.
+   * Partitions are updated in batches of MAX_PARTITION_UPDATES_PER_RPC. Returns
+   * the number of partitions updated as part of this operation, or 1 if the table
+   * is unpartitioned.
+   */
+  protected int dropTableStats(Table table) throws ImpalaException {
+    Preconditions.checkState(table.isWriteLockedByCurrentThread());
+    // Delete the ROW_COUNT from the table (if it was set).
+    org.apache.hadoop.hive.metastore.api.Table msTbl = table.getMetaStoreTable();
+    int numTargetedPartitions = 0;
+    boolean droppedRowCount =
+        msTbl.getParameters().remove(StatsSetupConst.ROW_COUNT) != null;
+    boolean droppedTotalSize =
+        msTbl.getParameters().remove(StatsSetupConst.TOTAL_SIZE) != null;
+
+    if (droppedRowCount || droppedTotalSize) {
+      applyAlterTable(msTbl, false, null);
+      ++numTargetedPartitions;
+    }
+
+    if (!(table instanceof HdfsTable) || table.getNumClusteringCols() == 0) {
+      // If this is not an HdfsTable or if the table is not partitioned, there
+      // is no more work to be done so just return.
+      return numTargetedPartitions;
+    }
+
+    // Now clear the stats for all partitions in the table.
+    HdfsTable hdfsTable = (HdfsTable) table;
+    Preconditions.checkNotNull(hdfsTable);
+
+    // List of partitions that were modified as part of this operation.
+    List<Builder> modifiedParts = Lists.newArrayList();
+    Collection<? extends FeFsPartition> parts =
+        FeCatalogUtils.loadAllPartitions(hdfsTable);
+    for (FeFsPartition fePart: parts) {
+      // TODO(todd): avoid downcast
+      HdfsPartition part = (HdfsPartition) fePart;
+      HdfsPartition.Builder partBuilder = null;
+      if (part.getPartitionStatsCompressed() != null) {
+        partBuilder = new HdfsPartition.Builder(part).dropPartitionStats();
+      }
+
+      // We need to update the partition if it has a ROW_COUNT parameter.
+      if (part.getParameters().containsKey(StatsSetupConst.ROW_COUNT)) {
+        if (partBuilder == null) {
+          partBuilder = new HdfsPartition.Builder(part);
+        }
+        partBuilder.removeRowCountParam();
+      }
+
+      if (partBuilder != null) modifiedParts.add(partBuilder);
+    }
+
+    bulkAlterPartitions(table, modifiedParts, null, UpdatePartitionMethod.IN_PLACE);
+    return modifiedParts.size();
+  }
+
+  /**
+   * Drops all column stats from the table in the HMS. Returns the number of columns
+   * that were updated as part of this operation.
+   */
+  protected int dropColumnStats(Table table) throws ImpalaRuntimeException {
+    Preconditions.checkState(table.isWriteLockedByCurrentThread());
+    int numColsUpdated = 0;
+    try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      for (Column col: table.getColumns()) {
+        // Skip columns that don't have stats.
+        if (!col.getStats().hasStats()) continue;
+
+        try {
+          MetastoreShim.deleteTableColumnStatistics(msClient.getHiveClient(),
+              table.getDb().getName(), table.getName(), col.getName());
+          ++numColsUpdated;
+        } catch (NoSuchObjectException e) {
+          // We don't care if the column stats do not exist, just ignore the exception.
+          // We would only expect to make it here if the Impala and HMS metadata
+          // diverged.
+        } catch (TException e) {
+          throw new ImpalaRuntimeException(
+              String.format(HMS_RPC_ERROR_FORMAT_STR,
+                  "delete_table_column_statistics"), e);
+        }
+      }
+    }
+    return numColsUpdated;
+  }
+
+  /**
+   * Update table properties to remove the COLUMN_STATS_ACCURATE entry if it exists.
+   */
+  protected void unsetTableColStats(org.apache.hadoop.hive.metastore.api.Table msTable,
+      TblTransaction tblTxn) throws ImpalaRuntimeException{
+    Map<String, String> params = msTable.getParameters();
+    if (params != null && params.containsKey(StatsSetupConst.COLUMN_STATS_ACCURATE)) {
+      params.remove(StatsSetupConst.COLUMN_STATS_ACCURATE);
+      applyAlterTable(msTable, false, tblTxn);
+    }
+  }
+
+  /**
+   * Update partitions properties to remove the COLUMN_STATS_ACCURATE entry from HMS.
+   * This method assumes the partitions in the input hmsPartitionsStatsUnset already
+   * had the COLUMN_STATS_ACCURATE removed from their properties.
+   */
+  protected void unsetPartitionsColStats(org.apache.hadoop.hive.metastore.api.Table msTable,
+      List<org.apache.hadoop.hive.metastore.api.Partition> hmsPartitionsStatsUnset,
+      TblTransaction tblTxn) throws ImpalaRuntimeException{
+    try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
+      try {
+        if (tblTxn != null) {
+          MetastoreShim.alterPartitionsWithTransaction(
+              msClient.getHiveClient(), msTable.getDbName(), msTable.getTableName(),
+              hmsPartitionsStatsUnset,  tblTxn);
+        } else {
+          MetastoreShim.alterPartitions(msClient.getHiveClient(), msTable.getDbName(),
+              msTable.getTableName(), hmsPartitionsStatsUnset);
+        }
+      } catch (TException te) {
+        new ImpalaRuntimeException(
+            String.format(HMS_RPC_ERROR_FORMAT_STR, "alter_partitions"), te);
+      }
     }
   }
 
@@ -291,6 +424,41 @@ public abstract class CatalogOperation {
       return isIcebergHmsIntegrationEnabled(msTbl);
     }
     return false;
+  }
+
+
+  /**
+   * Drops all associated caching requests on the table and/or table's partitions,
+   * uncaching all table data, if applicable. Throws no exceptions, only logs errors.
+   * Does not update the HMS.
+   */
+  protected static void uncacheTable(FeTable table) {
+    if (!(table instanceof FeFsTable)) return;
+    FeFsTable hdfsTable = (FeFsTable) table;
+    if (hdfsTable.isMarkedCached()) {
+      try {
+        HdfsCachingUtil.removeTblCacheDirective(table.getMetaStoreTable());
+      } catch (Exception e) {
+        LOG.error("Unable to uncache table: " + table.getFullName(), e);
+      }
+    }
+    if (table.getNumClusteringCols() > 0) {
+      Collection<? extends FeFsPartition> parts =
+          FeCatalogUtils.loadAllPartitions(hdfsTable);
+      for (FeFsPartition part: parts) {
+        if (part.isMarkedCached()) {
+          HdfsPartition.Builder partBuilder = new HdfsPartition.Builder(
+              (HdfsPartition) part);
+          try {
+            HdfsCachingUtil.removePartitionCacheDirective(partBuilder);
+            // We are dropping the table. Don't need to update the existing partition so
+            // ignore the partBuilder here.
+          } catch (Exception e) {
+            LOG.error("Unable to uncache partition: " + part.getPartitionName(), e);
+          }
+        }
+      }
+    }
   }
 
   protected static boolean isIcebergHmsIntegrationEnabled(

@@ -31,6 +31,11 @@ public class AlterViewOperation extends CatalogOperation {
   }
 
   @Override
+  protected boolean takeDdlLock() {
+    return false;
+  }
+
+  @Override
   public void doHmsOperations() throws ImpalaException {
     addCatalogServiceIdentifiers(tbl, catalog_.getCatalogServiceId(),
         newCatalogVersion);
@@ -68,7 +73,7 @@ public class AlterViewOperation extends CatalogOperation {
   public void before() throws ImpalaException {
     params = Preconditions.checkNotNull(request.getAlter_view_params());
     TableName tableName = TableName.fromThrift(params.getView_name());
-    Preconditions.checkState(tableName != null && tableName.isFullyQualified());
+    Preconditions.checkState(tableName.isFullyQualified());
     Preconditions.checkState(params.getColumns() != null &&
             params.getColumns().size() > 0,
         "Null or empty column list given as argument to DdlExecutor.alterView");

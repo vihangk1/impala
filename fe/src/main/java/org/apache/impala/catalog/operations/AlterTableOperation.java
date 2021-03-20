@@ -7,7 +7,6 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
@@ -131,6 +130,11 @@ public class AlterTableOperation extends CatalogOperation {
       TDdlExecResponse response, CatalogOpExecutor catalogOpExecutor,
       boolean wantMinimalResult) {
     super(ddlExecRequest, response, catalogOpExecutor, wantMinimalResult);
+  }
+
+  @Override
+  protected boolean takeDdlLock() {
+    return false;
   }
 
   /**

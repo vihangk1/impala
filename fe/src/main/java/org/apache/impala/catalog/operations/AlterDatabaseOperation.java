@@ -5,7 +5,6 @@ import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.PrincipalType;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.Db;
-import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventPropertyKey;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.ImpalaRuntimeException;
 import org.apache.impala.service.CatalogOpExecutor;
@@ -37,6 +36,11 @@ public class AlterDatabaseOperation extends CatalogOperation {
     Preconditions.checkNotNull(ddlExecRequest.getAlter_db_params());
     params = Preconditions
         .checkNotNull(ddlExecRequest.getAlter_db_params().set_owner_params);
+  }
+
+  @Override
+  protected boolean takeDdlLock() {
+    return false;
   }
 
   @Override
@@ -95,7 +99,6 @@ public class AlterDatabaseOperation extends CatalogOperation {
     originalOwnerType = msDb.getOwnerType();
     newOwnerName = msDb.getOwnerName();
     newOwnerType = msDb.getOwnerType();
-
   }
 
   @Override

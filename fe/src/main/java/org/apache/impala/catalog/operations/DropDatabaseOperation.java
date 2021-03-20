@@ -2,16 +2,10 @@ package org.apache.impala.catalog.operations;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
-import java.util.Collection;
 import java.util.List;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.Db;
-import org.apache.impala.catalog.FeCatalogUtils;
-import org.apache.impala.catalog.FeFsPartition;
-import org.apache.impala.catalog.FeFsTable;
-import org.apache.impala.catalog.FeTable;
-import org.apache.impala.catalog.HdfsPartition;
 import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.Table;
@@ -23,7 +17,6 @@ import org.apache.impala.thrift.TCatalogObject;
 import org.apache.impala.thrift.TDdlExecRequest;
 import org.apache.impala.thrift.TDdlExecResponse;
 import org.apache.impala.thrift.TDropDbParams;
-import org.apache.impala.util.HdfsCachingUtil;
 import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -145,42 +138,7 @@ public class DropDatabaseOperation extends CatalogOperation {
     if (catalogOpExecutor_.getAuthzConfig().isEnabled()) {
       catalogOpExecutor_.getAuthzManager().updateDatabaseOwnerPrivilege(params.server_name, dbName,
           db.getMetaStoreDb().getOwnerName(), db.getMetaStoreDb().getOwnerType(),
-          /* newOwner */ null, /* newOwnerType */ null, resp);
-    }
-  }
-
-
-  /**
-   * Drops all associated caching requests on the table and/or table's partitions,
-   * uncaching all table data, if applicable. Throws no exceptions, only logs errors.
-   * Does not update the HMS.
-   */
-  private static void uncacheTable(FeTable table) {
-    if (!(table instanceof FeFsTable)) return;
-    FeFsTable hdfsTable = (FeFsTable) table;
-    if (hdfsTable.isMarkedCached()) {
-      try {
-        HdfsCachingUtil.removeTblCacheDirective(table.getMetaStoreTable());
-      } catch (Exception e) {
-        LOG.error("Unable to uncache table: " + table.getFullName(), e);
-      }
-    }
-    if (table.getNumClusteringCols() > 0) {
-      Collection<? extends FeFsPartition> parts =
-          FeCatalogUtils.loadAllPartitions(hdfsTable);
-      for (FeFsPartition part: parts) {
-        if (part.isMarkedCached()) {
-          HdfsPartition.Builder partBuilder = new HdfsPartition.Builder(
-              (HdfsPartition) part);
-          try {
-            HdfsCachingUtil.removePartitionCacheDirective(partBuilder);
-            // We are dropping the table. Don't need to update the existing partition so
-            // ignore the partBuilder here.
-          } catch (Exception e) {
-            LOG.error("Unable to uncache partition: " + part.getPartitionName(), e);
-          }
-        }
-      }
+          /* newOwner */ null, /* newOwnerType */ null, response);
     }
   }
 
