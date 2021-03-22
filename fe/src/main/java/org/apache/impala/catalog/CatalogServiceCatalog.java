@@ -1862,11 +1862,11 @@ public class CatalogServiceCatalog extends Catalog {
     // the event ids, if there is external DDL activity on metastore during reset.
     // Unfortunately, there is no good way to avoid this since HMS does not provide
     // APIs which can fetch all the tables/databases at a given id. It is OKAY to
-    // re-process some of these events since event processor relies on creationTime of
-    // the objects to uniquely identify tables from create and drop events. In case of
+    // re-process some of these events since event processor relies on creation eventId
+    // to uniquely determine if the table was created/dropped by catalogd. In case of
     // alter events, however it is likely that some tables would be unnecessarily
-    // invalidated. That would happen when during reset, there were external alter events
-    // and by the time we processed them, Catalog had already loaded them.
+    // refreshed. That would happen when during reset, there were external alter events
+    // and by the time we processed them, catalog had already loaded them.
     long currentEventId = metastoreEventProcessor_.getCurrentEventId();
     // pause the event processing since the cache is anyways being cleared
     metastoreEventProcessor_.pause();

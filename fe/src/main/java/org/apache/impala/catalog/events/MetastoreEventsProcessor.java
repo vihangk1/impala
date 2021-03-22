@@ -395,7 +395,11 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
    */
   @Override
   public synchronized void pause() {
-    Preconditions.checkState(eventProcessorStatus_ != EventProcessorStatus.PAUSED);
+    // when concurrent invalidate metadata are running, it is possible the we receive
+    // a pause method call on a already paused events processor.
+    if (eventProcessorStatus_ == EventProcessorStatus.PAUSED) {
+      return;
+    }
     updateStatus(EventProcessorStatus.PAUSED);
     LOG.info(String.format("Event processing is paused. Last synced event id is %d",
         lastSyncedEventId_.get()));
@@ -420,9 +424,17 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   @Override
   public synchronized void start(long fromEventId) {
     Preconditions.checkArgument(fromEventId >= 0);
-    Preconditions.checkState(eventProcessorStatus_ != EventProcessorStatus.ACTIVE,
-        "Event processing start called when it is already active");
+    EventProcessorStatus currentStatus = eventProcessorStatus_;
     long prevLastSyncedEventId = lastSyncedEventId_.get();
+    if (currentStatus == EventProcessorStatus.ACTIVE) {
+      // if events processor is already active, we should make sure that the
+      // start event id provided is not behind the lastSyncedEventId. This could happen
+      // when there are concurrent invalidate metadata calls. if we detect such a case
+      // we should return here.
+      if (prevLastSyncedEventId >= fromEventId) {
+        return;
+      }
+    }
     lastSyncedEventId_.set(fromEventId);
     updateStatus(EventProcessorStatus.ACTIVE);
     LOG.info(String.format(
