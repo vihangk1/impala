@@ -3063,9 +3063,15 @@ public class CatalogOpExecutor {
             });
           }
         }
-        Pair<Long, org.apache.hadoop.hive.metastore.api.Table> eventTblPair = getTableFromEvents(
-            events);
-        long createEventId = eventTblPair == null ? -1 : eventTblPair.first;
+        // in case of synchronized tables it is possible that Kudu doesn't generate
+        // any metastore events.
+        long createEventId = -1;
+        if (events != null && !events.isEmpty()) {
+          Pair<Long, org.apache.hadoop.hive.metastore.api.Table> eventTblPair = getTableFromEvents(
+              events);
+          createEventId = eventTblPair == null ? -1: eventTblPair.first;
+        }
+
         // Add the table to the catalog cache
         Table newTbl = catalog_
             .addIncompleteTable(newTable.getDbName(), newTable.getTableName(),
