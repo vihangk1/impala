@@ -1147,7 +1147,7 @@ public class HdfsPartition extends CatalogObjectImpl
     private long numRows_ = -1;
     private long writeId_ = -1L;
     private long createEventId_ = -1L;
-    private InFlightEvents inFlightEvents_ = new InFlightEvents(20);
+    private InFlightEvents inFlightEvents_ = new InFlightEvents();
 
     @Nullable
     private HdfsPartition oldInstance_ = null;

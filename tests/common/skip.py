@@ -242,6 +242,9 @@ class SkipIfHive3:
              "dependencies of Hive 3, see IMPALA-9287.")
   non_acid = pytest.mark.skipif(HIVE_MAJOR_VERSION >= 3,
       reason="This test expects tables in non-AICD format.")
+  managed_location = pytest.mark.skipif(HIVE_MAJOR_VERSION >= 3,
+      reason="Managed location is not present in the events. See HIVE-24899. This may"
+             " be fixed once we have HIVE-24175.")
 
 
 class SkipIfHive2:

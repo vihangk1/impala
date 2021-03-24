@@ -33,7 +33,7 @@ import org.slf4j.LoggerFactory;
 public class InFlightEvents {
 
   // maximum number of catalog versions to store for in-flight events for this table
-  private static final int DEFAULT_MAX_NUMBER_OF_INFLIGHT_EVENTS = 10;
+  private static final int DEFAULT_MAX_NUMBER_OF_INFLIGHT_EVENTS = 100;
 
   // maximum number of eventIds to store for in-flight events for this table
   private static final int DEFAULT_MAX_NUMBER_OF_INFLIGHT_INSERT_EVENTS = 100;
@@ -60,11 +60,6 @@ public class InFlightEvents {
     this.capacity_for_eventIds_ = DEFAULT_MAX_NUMBER_OF_INFLIGHT_INSERT_EVENTS;
   }
 
-  public InFlightEvents(int capacity) {
-    Preconditions.checkState(capacity > 0);
-    this.capacity_for_versions_ = capacity;
-    this.capacity_for_eventIds_ = DEFAULT_MAX_NUMBER_OF_INFLIGHT_INSERT_EVENTS;
-  }
   /**
    * Gets the current list of versions for in-flight events for this table
    * @param isInsertEvent if true, return list of eventIds for in-flight Insert events

@@ -175,6 +175,7 @@ class TestMetadataQueryStatements(ImpalaTestSuite):
   @SkipIfIsilon.hive
   @SkipIfLocal.hive
   @pytest.mark.execute_serially  # because of use of hardcoded database
+  @SkipIfHive3.managed_location
   def test_describe_db(self, vector, cluster_properties):
     self.__test_describe_db_cleanup()
     try:
