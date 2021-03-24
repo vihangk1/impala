@@ -1716,14 +1716,6 @@ public class CatalogOpExecutor {
             throw new ImpalaRuntimeException(
                 String.format(HMS_RPC_ERROR_FORMAT_STR, "createDatabase"), e);
           }
-          // if the database already exists and events processor is active,
-          // we should rely on the database being created via the events instead of
-          // user command.
-          if (catalog_.isEventProcessingActive()) {
-            throw new ImpalaRuntimeException(
-                "Database already exists in metastore. Catalog will automatically create"
-                    + " the database once the event is processed");
-          }
           addSummary(resp, "Database already exists.");
           if (LOG.isTraceEnabled()) {
             LOG.trace(String.format("Ignoring '%s' when creating database %s because " +

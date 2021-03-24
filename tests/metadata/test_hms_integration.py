@@ -954,7 +954,7 @@ class TestHmsIntegration(ImpalaTestSuite):
         assert x1_location.endswith("/x=1");
 
   @pytest.mark.execute_serially
-  def test_add_preexisting_partitions_with_data(self, vector):
+  def test_add_preexisting_partitions_with_data(self, vector, cluster_properties):
     """
     IMPALA-1670, IMPALA-4141: After addding partitions that already exist in HMS, Impala
     can access the partition data.
@@ -977,8 +977,15 @@ class TestHmsIntegration(ImpalaTestSuite):
             % table_name)
         self.run_stmt_in_hive("insert into %s partition(x=3) values (1)"
             % table_name)
-        # No partitions exist yet in Impala.
-        assert [] == self.get_impala_partition_info(table_name, 'x')
+        if cluster_properties.is_event_polling_enabled():
+          # TODO(Vihang): It might be better to move this test to a custom-cluster
+          # test since waiting on events defeats the purpose of this test.
+	  assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+          # Using HMS event processor - wait until latest event is processed
+          EventProcessorUtils.wait_for_event_processing(self)
+        else:
+          # No partitions exist yet in Impala.
+          assert [] == self.get_impala_partition_info(table_name, 'x')
 
         # Add the same partitions in Impala with IF NOT EXISTS.
         self.client.execute("alter table %s add if not exists partition (x=1) "\
