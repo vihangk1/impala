@@ -939,7 +939,7 @@ public class CatalogServiceCatalog extends Catalog {
       // no version info or service id in the event
       if (versionNumber == -1 || serviceIdFromEvent.isEmpty()) {
         LOG.info("Not a self-event since the given version is {} and service id is {}",
-            versionNumber, serviceIdFromEvent);
+            versionNumber, serviceIdFromEvent.isEmpty() ? "empty" : serviceIdFromEvent);
         return false;
       }
       // if the service id from event doesn't match with our service id this is not a

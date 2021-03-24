@@ -206,6 +206,8 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   // last synced event id
   public static final String LAST_SYNCED_ID_METRIC = "last-synced-event-id";
   // metric name which counts the number of self-events which are skipped
+  // currently this counter only applies to ALTER events (except for the rename case)
+  // TODO(Vihang) this metric is confusing; unify this with events-skipped metric
   public static final String NUMBER_OF_SELF_EVENTS = "self-events-skipped";
   // metric name for number of tables which are refreshed by event processor so far
   public static final String NUMBER_OF_TABLE_REFRESHES = "tables-refreshed";
