@@ -1017,8 +1017,7 @@ public class CatalogOpExecutor {
       List<FeFsPartition> affectedExistingPartitions = new ArrayList<>();
       List<org.apache.hadoop.hive.metastore.api.Partition> hmsPartitionsStatsUnset =
           Lists.newArrayList();
-      addCatalogServiceIdentifiers(table, catalog_.getCatalogServiceId(),
-          newCatalogVersion);
+      CatalogOperation.addCatalogServiceIdentifiers(catalog_, table, newCatalogVersion);
       if (table.getNumClusteringCols() > 0) {
         // Set of all partition names targeted by the insert that need to be created
         // in the Metastore (partitions that do not currently exist in the catalog).
@@ -1075,7 +1074,7 @@ public class CatalogOpExecutor {
               partition.setSd(msTbl.getSd().deepCopy());
               partition.getSd().setSerdeInfo(msTbl.getSd().getSerdeInfo().deepCopy());
               partition.getSd().setLocation(msTbl.getSd().getLocation() + "/" + partName);
-              addCatalogServiceIdentifiers(msTbl, partition);
+              CatalogOperation.addCatalogServiceIdentifiers(catalog_, msTbl, partition);
               MetastoreShim.updatePartitionStatsFast(partition, msTbl, warehouse);
             }
 
@@ -1207,7 +1206,7 @@ public class CatalogOpExecutor {
         createInsertEvents(table, filesBeforeInsert, affectedExistingPartitions,
             newPartsCreated, update.is_overwrite, txnId, writeId);
       }
-      addTableToCatalogUpdate(table, update.header.want_minimal_response,
+      CatalogOperation.addTableToCatalogUpdate(table, update.header.want_minimal_response,
           response.result);
     } finally {
       context.stop();
@@ -1220,6 +1219,17 @@ public class CatalogOpExecutor {
           catalog_.waitForSyncDdlVersion(response.getResult()));
     }
     return response;
+  }
+
+  /**
+   * This method checks if the write lock of 'catalog_' is unlocked. If it's still locked
+   * then it logs an error and unlocks it.
+   */
+  public void UnlockWriteLockIfErronouslyLocked() {
+    if(catalog_.getLock().isWriteLockedByCurrentThread()) {
+      LOG.error("Write lock should have been released.");
+      catalog_.getLock().writeLock().unlock();
+    }
   }
 
   /**
@@ -1509,7 +1519,9 @@ public class CatalogOpExecutor {
     Map<String, String> params = msTable.getParameters();
     if (params != null && params.containsKey(StatsSetupConst.COLUMN_STATS_ACCURATE)) {
       params.remove(StatsSetupConst.COLUMN_STATS_ACCURATE);
-      applyAlterTable(msTable, false, tblTxn);
+      try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
+        CatalogOperation.applyAlterTable(metaStoreClient, msTable, false, tblTxn);
+      }
     }
   }
 

@@ -37,8 +37,7 @@ public class AlterViewOperation extends CatalogOperation {
 
   @Override
   public void doHmsOperations() throws ImpalaException {
-    addCatalogServiceIdentifiers(tbl, catalog_.getCatalogServiceId(),
-        newCatalogVersion);
+    addCatalogServiceIdentifiers(catalog_, tbl, newCatalogVersion);
     TableName tableName = TableName.fromThrift(params.getView_name());
     // Operate on a copy of the metastore table to avoid prematurely applying the
     // alteration to our cached table in case the actual alteration fails.
@@ -88,7 +87,7 @@ public class AlterViewOperation extends CatalogOperation {
 
   @Override
   public void after() {
-    UnlockWriteLockIfErronouslyLocked();
+    catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     tbl.releaseWriteLock();
   }
 

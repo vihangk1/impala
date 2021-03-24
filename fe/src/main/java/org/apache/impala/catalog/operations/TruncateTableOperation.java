@@ -284,7 +284,7 @@ public class TruncateTableOperation extends CatalogOperation {
 
   @Override
   protected void after() throws ImpalaException {
-    UnlockWriteLockIfErronouslyLocked();
+    catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     if (table.isWriteLockedByCurrentThread()) {
       table.releaseWriteLock();
     }

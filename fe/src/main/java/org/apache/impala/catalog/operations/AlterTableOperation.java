@@ -402,7 +402,7 @@ public class AlterTableOperation extends CatalogOperation {
     partition.setSd(sd);
     // if external event processing is enabled, add the catalog service identifiers
     // from table to the partition
-    addCatalogServiceIdentifiers(msTbl, partition);
+    addCatalogServiceIdentifiers(catalog_, msTbl, partition);
     return partition;
   }
 
@@ -1691,7 +1691,7 @@ public class AlterTableOperation extends CatalogOperation {
     catalogOpExecutor_.tryWriteLock(tbl);
     // Get a new catalog version to assign to the table being altered.
     newCatalogVersion = catalog_.incrementAndGetCatalogVersion();
-    addCatalogServiceIdentifiers(tbl, catalog_.getCatalogServiceId(), newCatalogVersion);
+    addCatalogServiceIdentifiers(catalog_, tbl, newCatalogVersion);
     context = tbl.getMetrics().getTimer(Table.ALTER_DURATION_METRIC).time();
     if (!isRenameOperation()) {
       // if this is not a rename operation then we release the catalog lock; else
@@ -1703,7 +1703,7 @@ public class AlterTableOperation extends CatalogOperation {
   @Override
   public void after() {
     context.stop();
-    UnlockWriteLockIfErronouslyLocked();
+    catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     // Clear in-progress modifications in case of exceptions.
     tbl.resetInProgressModification();
     tbl.releaseWriteLock();

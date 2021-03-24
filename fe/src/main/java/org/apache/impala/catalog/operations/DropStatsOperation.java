@@ -95,7 +95,7 @@ public class DropStatsOperation extends CatalogOperation {
 
   @Override
   protected void after() {
-    UnlockWriteLockIfErronouslyLocked();
+    catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     table.releaseWriteLock();
   }
 }

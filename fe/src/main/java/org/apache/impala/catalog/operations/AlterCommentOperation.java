@@ -13,7 +13,6 @@ import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.Table;
 import org.apache.impala.common.ImpalaException;
 import org.apache.impala.common.ImpalaRuntimeException;
-import org.apache.impala.common.InternalException;
 import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.service.KuduCatalogOpExecutor;
 import org.apache.impala.thrift.TColumn;
@@ -21,7 +20,6 @@ import org.apache.impala.thrift.TColumnName;
 import org.apache.impala.thrift.TCommentOnParams;
 import org.apache.impala.thrift.TDdlExecRequest;
 import org.apache.impala.thrift.TDdlExecResponse;
-import org.apache.impala.thrift.TDdlType;
 
 public class AlterCommentOperation extends CatalogOperation {
 
@@ -53,8 +51,7 @@ public class AlterCommentOperation extends CatalogOperation {
       // comment on db
       Preconditions.checkNotNull(db);
       msDb = db.getMetaStoreDb().deepCopy();
-      addCatalogServiceIdentifiers(msDb, catalog_.getCatalogServiceId(),
-          newCatalogVersion);
+      addCatalogServiceIdentifiers(catalog_, msDb, newCatalogVersion);
       msDb.setDescription(comment);
       try {
         applyAlterDatabase(msDb);
@@ -66,8 +63,7 @@ public class AlterCommentOperation extends CatalogOperation {
       Preconditions.checkNotNull(tbl);
       Preconditions.checkState(tbl.isWriteLockedByCurrentThread());
       Preconditions.checkState(newCatalogVersion > 0);
-      addCatalogServiceIdentifiers(tbl, catalog_.getCatalogServiceId(),
-          newCatalogVersion);
+      addCatalogServiceIdentifiers(catalog_, tbl, newCatalogVersion);
       org.apache.hadoop.hive.metastore.api.Table msTbl = tbl.getMetaStoreTable()
           .deepCopy();
       if (comment == null) {

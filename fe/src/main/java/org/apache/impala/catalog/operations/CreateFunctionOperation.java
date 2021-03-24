@@ -118,8 +118,7 @@ public class CreateFunctionOperation extends CatalogOperation {
       // of hms Database object and then update the Db once the HMS operation succeeds
       // similar to what happens in alterDatabaseSetOwner method.
       if (catalog_.addFunction(fn)) {
-        addCatalogServiceIdentifiers(db.getMetaStoreDb(),
-            catalog_.getCatalogServiceId(), newCatalogVersion);
+        addCatalogServiceIdentifiers(catalog_, db.getMetaStoreDb(), newCatalogVersion);
         // Flush DB changes to metastore
         applyAlterDatabase(db.getMetaStoreDb());
         addedFunctions.add(fn.toTCatalogObject());

@@ -273,7 +273,7 @@ public abstract class CatalogOperation {
       throws ImpalaException {
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       Partition hmsPartition = partBuilder.toHmsPartition();
-      addCatalogServiceIdentifiers(tbl.getMetaStoreTable(), hmsPartition);
+      addCatalogServiceIdentifiers(catalog_, tbl.getMetaStoreTable(), hmsPartition);
       applyAlterHmsPartitions(tbl.getMetaStoreTable().deepCopy(), msClient,
           tbl.getTableName(), Arrays.asList(hmsPartition));
       addToInflightVersionsOfPartition(hmsPartition.getParameters(), partBuilder);
@@ -289,16 +289,6 @@ public abstract class CatalogOperation {
     } catch (TException e) {
       throw new ImpalaRuntimeException(
           String.format(HMS_RPC_ERROR_FORMAT_STR, "alter_partitions"), e);
-    }
-  }
-  /**
-   * This method checks if the write lock of 'catalog_' is unlocked. If it's still locked
-   * then it logs an error and unlocks it.
-   */
-  protected void UnlockWriteLockIfErronouslyLocked() {
-    if(catalog_.getLock().isWriteLockedByCurrentThread()) {
-      LOG.error("Write lock should have been released.");
-      catalog_.getLock().writeLock().unlock();
     }
   }
 
@@ -543,29 +533,35 @@ public abstract class CatalogOperation {
       throws ImpalaRuntimeException {
     try (MetaStoreClient msClient = catalogOpExecutor_.getCatalog()
         .getMetaStoreClient()) {
-      if (overwriteLastDdlTime) {
-        // It would be enough to remove this table property, as HMS would fill it, but
-        // this would make it necessary to reload the table after alter_table in order to
-        // remain consistent with HMS.
-        Table.updateTimestampProperty(msTbl, Table.TBL_PROP_LAST_DDL_TIME);
-      }
+      applyAlterTable(msClient, msTbl, overwriteLastDdlTime, tblTxn);
+    }
+  }
 
-      // Avoid computing/setting stats on the HMS side because that may reset the
-      // 'numRows' table property (see HIVE-15653). The DO_NOT_UPDATE_STATS flag
-      // tells the HMS not to recompute/reset any statistics on its own. Any
-      // stats-related alterations passed in the RPC will still be applied.
-      msTbl.putToParameters(StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
+  public static void applyAlterTable(MetaStoreClient msClient,
+      org.apache.hadoop.hive.metastore.api.Table msTbl,
+      boolean overwriteLastDdlTime, TblTransaction tblTxn) throws ImpalaRuntimeException {
+    if (overwriteLastDdlTime) {
+      // It would be enough to remove this table property, as HMS would fill it, but
+      // this would make it necessary to reload the table after alter_table in order to
+      // remain consistent with HMS.
+      Table.updateTimestampProperty(msTbl, Table.TBL_PROP_LAST_DDL_TIME);
+    }
 
-      if (tblTxn != null) {
-        MetastoreShim.alterTableWithTransaction(msClient.getHiveClient(), msTbl, tblTxn);
-      } else {
-        try {
-          msClient.getHiveClient().alter_table(
-              msTbl.getDbName(), msTbl.getTableName(), msTbl);
-        } catch (TException e) {
-          throw new ImpalaRuntimeException(
-              String.format(HMS_RPC_ERROR_FORMAT_STR, "alter_table"), e);
-        }
+    // Avoid computing/setting stats on the HMS side because that may reset the
+    // 'numRows' table property (see HIVE-15653). The DO_NOT_UPDATE_STATS flag
+    // tells the HMS not to recompute/reset any statistics on its own. Any
+    // stats-related alterations passed in the RPC will still be applied.
+    msTbl.putToParameters(StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
+
+    if (tblTxn != null) {
+      MetastoreShim.alterTableWithTransaction(msClient.getHiveClient(), msTbl, tblTxn);
+    } else {
+      try {
+        msClient.getHiveClient().alter_table(
+            msTbl.getDbName(), msTbl.getTableName(), msTbl);
+      } catch (TException e) {
+        throw new ImpalaRuntimeException(
+            String.format(HMS_RPC_ERROR_FORMAT_STR, "alter_table"), e);
       }
     }
   }
@@ -574,13 +570,13 @@ public abstract class CatalogOperation {
    * Adds the catalog service id and the given catalog version to the table
    * parameters. No-op if event processing is disabled
    */
-  protected void addCatalogServiceIdentifiers(Table tbl, String catalogServiceId,
-      long newCatalogVersion) {
-    if (!catalog_.isEventProcessingActive()) return;
+  public static void addCatalogServiceIdentifiers(
+      CatalogServiceCatalog catalog, Table tbl, long newCatalogVersion) {
+    if (!catalog.isEventProcessingActive()) return;
     org.apache.hadoop.hive.metastore.api.Table msTbl = tbl.getMetaStoreTable();
     msTbl.putToParameters(
         MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(),
-        catalogServiceId);
+        catalog.getCatalogServiceId());
     msTbl.putToParameters(
         MetastoreEventPropertyKey.CATALOG_VERSION.getKey(),
         String.valueOf(newCatalogVersion));
@@ -590,14 +586,14 @@ public abstract class CatalogOperation {
    * Adds the catalog service id and the given catalog version to the database parameters.
    * No-op if event processing is disabled
    */
-  protected void addCatalogServiceIdentifiers(
-      Database msDb, String catalogServiceId, long newCatalogVersion) {
-    if (!catalog_.isEventProcessingActive()) {
+  public static void addCatalogServiceIdentifiers(
+      CatalogServiceCatalog catalog, Database msDb, long newCatalogVersion) {
+    if (!catalog.isEventProcessingActive()) {
       return;
     }
     Preconditions.checkNotNull(msDb);
     msDb.putToParameters(MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(),
-        catalogServiceId);
+        catalog.getCatalogServiceId());
     msDb.putToParameters(MetastoreEventPropertyKey.CATALOG_VERSION.getKey(),
         String.valueOf(newCatalogVersion));
   }
@@ -606,9 +602,10 @@ public abstract class CatalogOperation {
    * No-op if event processing is disabled. Adds this catalog service id and the given
    * catalog version to the partition parameters from table parameters.
    */
-  protected void addCatalogServiceIdentifiers(
-      org.apache.hadoop.hive.metastore.api.Table msTbl, Partition partition) {
-    if (!catalog_.isEventProcessingActive()) {
+  public static void addCatalogServiceIdentifiers(
+      CatalogServiceCatalog catalog, org.apache.hadoop.hive.metastore.api.Table msTbl,
+      Partition partition) {
+    if (!catalog.isEventProcessingActive()) {
       return;
     }
     Preconditions.checkState(msTbl.isSetParameters());
@@ -629,7 +626,7 @@ public abstract class CatalogOperation {
     String serviceIdFromTbl =
         tblParams.get(MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey());
     String version = tblParams.get(MetastoreEventPropertyKey.CATALOG_VERSION.getKey());
-    if (catalog_.getCatalogServiceId().equals(serviceIdFromTbl)) {
+    if (catalog.getCatalogServiceId().equals(serviceIdFromTbl)) {
       partition.putToParameters(
           MetastoreEventPropertyKey.CATALOG_SERVICE_ID.getKey(), serviceIdFromTbl);
       partition.putToParameters(
@@ -654,7 +651,7 @@ public abstract class CatalogOperation {
     for (HdfsPartition.Builder p : modifiedParts) {
       Partition msPart = p.toHmsPartition();
       if (msPart != null) {
-        addCatalogServiceIdentifiers(tbl.getMetaStoreTable(), msPart);
+        addCatalogServiceIdentifiers(catalog_, tbl.getMetaStoreTable(), msPart);
         msPartitionToBuilders.put(msPart, p);
       }
     }

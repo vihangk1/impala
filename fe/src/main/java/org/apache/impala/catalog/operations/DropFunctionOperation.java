@@ -77,8 +77,7 @@ public class DropFunctionOperation extends CatalogOperation {
               "Function: " + desc.signatureString() + " does not exist.");
         }
       } else {
-        addCatalogServiceIdentifiers(db.getMetaStoreDb(),
-            catalog_.getCatalogServiceId(), newCatalogVersion);
+        addCatalogServiceIdentifiers(catalog_, db.getMetaStoreDb(), newCatalogVersion);
         // Flush DB changes to metastore
         applyAlterDatabase(db.getMetaStoreDb());
         removedFunctions.add(fn.toTCatalogObject());

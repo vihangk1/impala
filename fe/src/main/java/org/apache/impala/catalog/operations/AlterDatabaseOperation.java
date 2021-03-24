@@ -46,8 +46,7 @@ public class AlterDatabaseOperation extends CatalogOperation {
   @Override
   public void doHmsOperations() throws ImpalaException {
     Database msDbCopy = db.getMetaStoreDb().deepCopy();
-    addCatalogServiceIdentifiers(msDbCopy, catalog_.getCatalogServiceId(),
-        newCatalogVersion);
+    addCatalogServiceIdentifiers(catalog_, msDbCopy, newCatalogVersion);
     msDbCopy.setOwnerName(params.owner_name);
     msDbCopy.setOwnerType(PrincipalType.valueOf(params.owner_type.name()));
     try {
