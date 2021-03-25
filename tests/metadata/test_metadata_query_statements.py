@@ -23,7 +23,7 @@ import re
 from tests.beeswax.impala_beeswax import ImpalaBeeswaxException
 from tests.common.impala_test_suite import ImpalaTestSuite
 from tests.common.skip import (SkipIfIsilon, SkipIfS3, SkipIfABFS, SkipIfADLS,
-                               SkipIfGCS, SkipIfLocal, SkipIfCatalogV2)
+                               SkipIfGCS, SkipIfLocal, SkipIfCatalogV2, SkipIfHive3)
 from tests.common.test_dimensions import ALL_NODES_ONLY
 from tests.common.test_dimensions import create_exec_option_dimension
 from tests.common.test_dimensions import create_uncompressed_text_dimension
@@ -174,8 +174,8 @@ class TestMetadataQueryStatements(ImpalaTestSuite):
   @SkipIfADLS.hive
   @SkipIfIsilon.hive
   @SkipIfLocal.hive
-  @pytest.mark.execute_serially  # because of use of hardcoded database
   @SkipIfHive3.managed_location
+  @pytest.mark.execute_serially  # because of use of hardcoded database
   def test_describe_db(self, vector, cluster_properties):
     self.__test_describe_db_cleanup()
     try:

@@ -100,7 +100,8 @@ class TestParquetInterop(CustomClusterTestSuite):
       if cluster_properties.is_event_polling_enabled():
         assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
         EventProcessorUtils.wait_for_event_processing(self)
-        self.confirm_table_exists(unique_database, hive_table)
+        # confirm the table exists
+        self.client.execute("describe {0}".format(hive_table))
       else:
         self.client.execute("invalidate metadata {0}".format(hive_table))
 

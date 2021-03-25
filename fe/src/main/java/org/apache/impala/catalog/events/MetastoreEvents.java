@@ -699,7 +699,7 @@ public class MetastoreEvents {
       // MetastoreEventsProcessor)
       try {
         if (catalogOpExecutor_.addTableIfNotRemovedLater(eventId_, msTbl_)) {
-          infoLog("Successfully added table", getFullyQualifiedTblName());
+          infoLog("Successfully added table {}", getFullyQualifiedTblName());
           metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_TABLES_ADDED).inc();
         } else {
           metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
