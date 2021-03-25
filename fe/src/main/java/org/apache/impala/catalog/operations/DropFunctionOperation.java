@@ -24,7 +24,7 @@ import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class DropFunctionOperation extends CatalogOperation {
+public class DropFunctionOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(DropFunctionOperation.class);
   private Db db;
@@ -43,7 +43,7 @@ public class DropFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -121,7 +121,7 @@ public class DropFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     fName = FunctionName.fromThrift(params.fn_name);
     db = catalog_.getDb(fName.getDb());
     if (db == null) {
@@ -142,7 +142,7 @@ public class DropFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() throws ImpalaException {
+  protected void cleanUp() throws ImpalaException {
     if (db.getLock().isHeldByCurrentThread()) {
       db.getLock().unlock();
     }

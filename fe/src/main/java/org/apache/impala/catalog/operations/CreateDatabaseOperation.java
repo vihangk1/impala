@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
  * may vary depending on the Meta Store connection type (thrift vs direct db).
  * @param  syncDdl tells if SYNC_DDL option is enabled on this DDL request.
  */
-public class CreateDatabaseOperation extends CatalogOperation {
+public class CreateDatabaseOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory
       .getLogger(CreateDatabaseOperation.class);
@@ -45,7 +45,7 @@ public class CreateDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  public boolean takeDdlLock() {
+  public boolean requiresDdlLock() {
     return takeDdlLock;
   }
 
@@ -131,7 +131,7 @@ public class CreateDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  public void before() throws ImpalaException {
+  public void init() throws ImpalaException {
     params = Preconditions.checkNotNull(request.getCreate_db_params());
     dbName = params.getDb();
     Preconditions.checkState(dbName != null && !dbName.isEmpty(),
@@ -159,7 +159,7 @@ public class CreateDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  public void after() {
+  public void cleanUp() {
     if (syncDdl && existingDb != null) {
       // Release the locks held in tryLock() in the before method
       catalog_.getLock().writeLock().unlock();

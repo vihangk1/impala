@@ -17,12 +17,8 @@
 
 package org.apache.impala.service;
 
-import static org.apache.impala.analysis.Analyzer.ACCESSTYPE_READWRITE;
-import static org.apache.impala.catalog.operations.CatalogOperation.setStorageDescriptorFileFormat;
-
 import com.codahale.metrics.Timer;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Iterables;
@@ -32,49 +28,26 @@ import com.google.common.collect.Sets;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
-import javax.annotation.Nullable;
 import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.hive.common.StatsSetupConst;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.PartitionDropOptions;
-import org.apache.hadoop.hive.metastore.TableType;
 import org.apache.hadoop.hive.metastore.Warehouse;
 import org.apache.hadoop.hive.metastore.api.AlreadyExistsException;
-import org.apache.hadoop.hive.metastore.api.ColumnStatistics;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsData;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsDesc;
-import org.apache.hadoop.hive.metastore.api.ColumnStatisticsObj;
-import org.apache.hadoop.hive.metastore.api.DataOperationType;
-import org.apache.hadoop.hive.metastore.api.Database;
-import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.InsertEventRequestData;
-import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
-import org.apache.hadoop.hive.metastore.api.Partition;
-import org.apache.hadoop.hive.metastore.api.PrincipalType;
-import org.apache.hadoop.hive.metastore.api.SQLForeignKey;
-import org.apache.hadoop.hive.metastore.api.SQLPrimaryKey;
-import org.apache.hadoop.hive.metastore.api.SerDeInfo;
-import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.util.StringUtils;
-import org.apache.iceberg.catalog.TableIdentifier;
-import org.apache.impala.analysis.AlterTableSortByStmt;
-import org.apache.impala.analysis.FunctionName;
 import org.apache.impala.analysis.TableName;
 import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.authorization.AuthorizationDelta;
@@ -83,43 +56,27 @@ import org.apache.impala.authorization.User;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogObject;
 import org.apache.impala.catalog.CatalogServiceCatalog;
-import org.apache.impala.catalog.Column;
-import org.apache.impala.catalog.ColumnNotFoundException;
-import org.apache.impala.catalog.ColumnStats;
 import org.apache.impala.catalog.DataSource;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeCatalogUtils;
-import org.apache.impala.catalog.IcebergTable;
 import org.apache.impala.catalog.FeFsPartition;
 import org.apache.impala.catalog.FeFsTable;
 import org.apache.impala.catalog.FeIcebergTable;
-import org.apache.impala.catalog.FeTable;
-import org.apache.impala.catalog.Function;
-import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.catalog.HdfsPartition;
 import org.apache.impala.catalog.HdfsTable;
-import org.apache.impala.catalog.HiveStorageDescriptorFactory;
 import org.apache.impala.catalog.IncompleteTable;
-import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
-import org.apache.impala.catalog.PartitionNotFoundException;
-import org.apache.impala.catalog.PartitionStatsUtil;
-import org.apache.impala.catalog.RowFormat;
-import org.apache.impala.catalog.ScalarFunction;
 import org.apache.impala.catalog.Table;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.catalog.TableNotFoundException;
-import org.apache.impala.catalog.Transaction;
-import org.apache.impala.catalog.Type;
 import org.apache.impala.catalog.View;
-import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventPropertyKey;
 import org.apache.impala.catalog.monitor.CatalogMonitor;
 import org.apache.impala.catalog.monitor.CatalogOperationMetrics;
 import org.apache.impala.catalog.operations.AlterCommentOperation;
 import org.apache.impala.catalog.operations.AlterDatabaseOperation;
 import org.apache.impala.catalog.operations.AlterTableOperation;
 import org.apache.impala.catalog.operations.AlterViewOperation;
-import org.apache.impala.catalog.operations.CatalogOperation;
+import org.apache.impala.catalog.operations.CatalogDdlOperation;
 import org.apache.impala.catalog.operations.CreateDatabaseOperation;
 import org.apache.impala.catalog.operations.CreateDatasourceOperation;
 import org.apache.impala.catalog.operations.CreateFunctionOperation;
@@ -130,6 +87,7 @@ import org.apache.impala.catalog.operations.DropDatabaseOperation;
 import org.apache.impala.catalog.operations.DropFunctionOperation;
 import org.apache.impala.catalog.operations.DropStatsOperation;
 import org.apache.impala.catalog.operations.DropTableOrViewOperation;
+import org.apache.impala.catalog.operations.RefreshFunctionsOperation;
 import org.apache.impala.catalog.operations.TruncateTableOperation;
 import org.apache.impala.common.FileSystemUtil;
 import org.apache.impala.common.ImpalaException;
@@ -139,42 +97,17 @@ import org.apache.impala.common.JniUtil;
 import org.apache.impala.common.Pair;
 import org.apache.impala.common.Reference;
 import org.apache.impala.common.TransactionException;
-import org.apache.impala.common.TransactionKeepalive.HeartbeatContext;
 import org.apache.impala.compat.MetastoreShim;
-import org.apache.impala.thrift.JniCatalogConstants;
 import org.apache.impala.thrift.TAlterDbParams;
-import org.apache.impala.thrift.TAlterDbSetOwnerParams;
-import org.apache.impala.thrift.TAlterTableAddColsParams;
-import org.apache.impala.thrift.TAlterTableAddDropRangePartitionParams;
-import org.apache.impala.thrift.TAlterTableAddPartitionParams;
-import org.apache.impala.thrift.TAlterTableAlterColParams;
-import org.apache.impala.thrift.TAlterTableDropColParams;
-import org.apache.impala.thrift.TAlterTableDropPartitionParams;
-import org.apache.impala.thrift.TAlterTableOrViewSetOwnerParams;
 import org.apache.impala.thrift.TAlterTableParams;
-import org.apache.impala.thrift.TAlterTableReplaceColsParams;
-import org.apache.impala.thrift.TAlterTableSetCachedParams;
-import org.apache.impala.thrift.TAlterTableSetFileFormatParams;
-import org.apache.impala.thrift.TAlterTableSetLocationParams;
-import org.apache.impala.thrift.TAlterTableSetRowFormatParams;
-import org.apache.impala.thrift.TAlterTableSetTblPropertiesParams;
-import org.apache.impala.thrift.TAlterTableType;
-import org.apache.impala.thrift.TAlterTableUpdateStatsParams;
 import org.apache.impala.thrift.TCatalogObject;
-import org.apache.impala.thrift.TCatalogObjectType;
 import org.apache.impala.thrift.TCatalogServiceRequestHeader;
 import org.apache.impala.thrift.TCatalogUpdateResult;
-import org.apache.impala.thrift.TColumn;
 import org.apache.impala.thrift.TColumnName;
-import org.apache.impala.thrift.TColumnStats;
-import org.apache.impala.thrift.TColumnType;
-import org.apache.impala.thrift.TColumnValue;
 import org.apache.impala.thrift.TCommentOnParams;
 import org.apache.impala.thrift.TCopyTestCaseReq;
-import org.apache.impala.thrift.TCreateDataSourceParams;
 import org.apache.impala.thrift.TCreateDbParams;
 import org.apache.impala.thrift.TCreateDropRoleParams;
-import org.apache.impala.thrift.TCreateFunctionParams;
 import org.apache.impala.thrift.TCreateOrAlterViewParams;
 import org.apache.impala.thrift.TCreateTableLikeParams;
 import org.apache.impala.thrift.TCreateTableParams;
@@ -184,31 +117,16 @@ import org.apache.impala.thrift.TDdlExecResponse;
 import org.apache.impala.thrift.TDdlType;
 import org.apache.impala.thrift.TDropDataSourceParams;
 import org.apache.impala.thrift.TDropDbParams;
-import org.apache.impala.thrift.TDropFunctionParams;
 import org.apache.impala.thrift.TDropStatsParams;
 import org.apache.impala.thrift.TDropTableOrViewParams;
 import org.apache.impala.thrift.TErrorCode;
-import org.apache.impala.thrift.TFunctionBinaryType;
 import org.apache.impala.thrift.TGrantRevokePrivParams;
 import org.apache.impala.thrift.TGrantRevokeRoleParams;
-import org.apache.impala.thrift.THdfsCachingOp;
-import org.apache.impala.thrift.THdfsFileFormat;
-import org.apache.impala.thrift.TIcebergCatalog;
-import org.apache.impala.thrift.TPartitionDef;
-import org.apache.impala.thrift.TPartitionKeyValue;
-import org.apache.impala.thrift.TPartitionStats;
-import org.apache.impala.thrift.TRangePartitionOperationType;
 import org.apache.impala.thrift.TResetMetadataRequest;
 import org.apache.impala.thrift.TResetMetadataResponse;
-import org.apache.impala.thrift.TResultRow;
-import org.apache.impala.thrift.TResultSet;
-import org.apache.impala.thrift.TResultSetMetadata;
-import org.apache.impala.thrift.TSortingOrder;
 import org.apache.impala.thrift.TStatus;
 import org.apache.impala.thrift.TTable;
 import org.apache.impala.thrift.TTableName;
-import org.apache.impala.thrift.TTableRowFormat;
-import org.apache.impala.thrift.TTableStats;
 import org.apache.impala.thrift.TTestCaseData;
 import org.apache.impala.thrift.TTruncateParams;
 import org.apache.impala.thrift.TUpdateCatalogRequest;
@@ -216,15 +134,10 @@ import org.apache.impala.thrift.TUpdateCatalogResponse;
 import org.apache.impala.util.AcidUtils;
 import org.apache.impala.util.AcidUtils.TblTransaction;
 import org.apache.impala.util.CompressionUtil;
-import org.apache.impala.util.DebugUtils;
-import org.apache.impala.util.FunctionUtils;
 import org.apache.impala.util.HdfsCachingUtil;
-import org.apache.impala.util.IcebergUtil;
-import org.apache.impala.util.KuduUtil;
 import org.apache.impala.util.MetaStoreUtil;
 import org.apache.impala.util.MetaStoreUtil.TableInsertEventInfo;
 import org.apache.thrift.TException;
-import org.apache.zookeeper.Op.Create;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -605,7 +518,7 @@ public class CatalogOpExecutor {
         numTblsAdded, numViewsAdded));
     responseStr.append("\n\n").append(testCaseData.getQuery_stmt());
     LOG.info(String.format("%s. Testcase path: %s", responseStr, inputPath));
-    CatalogOperation.addSummary(response, responseStr.toString());
+    CatalogDdlOperation.addSummary(response, responseStr.toString());
     return testCaseData.getQuery_stmt();
   }
 
@@ -643,14 +556,14 @@ public class CatalogOpExecutor {
         throw new ImpalaRuntimeException("Data source " + params.getData_source() +
             " does not exists.");
       }
-      CatalogOperation.addSummary(resp, "Data source does not exist.");
+      CatalogDdlOperation.addSummary(resp, "Data source does not exist.");
       // No data source was removed.
       resp.result.setVersion(catalog_.getCatalogVersion());
       return;
     }
     resp.result.addToRemoved_catalog_objects(dataSource.toTCatalogObject());
     resp.result.setVersion(dataSource.getCatalogVersion());
-    CatalogOperation.addSummary(resp, "Data source has been dropped.");
+    CatalogDdlOperation.addSummary(resp, "Data source has been dropped.");
   }
 
   /**
@@ -664,7 +577,7 @@ public class CatalogOpExecutor {
     Preconditions.checkNotNull(resp);
     Preconditions.checkArgument(!createDropRoleParams.isIs_drop());
     authzManager_.createRole(requestingUser, createDropRoleParams, resp);
-    CatalogOperation.addSummary(resp, "Role has been created.");
+    CatalogDdlOperation.addSummary(resp, "Role has been created.");
   }
 
   /**
@@ -678,7 +591,7 @@ public class CatalogOpExecutor {
     Preconditions.checkNotNull(resp);
     Preconditions.checkArgument(createDropRoleParams.isIs_drop());
     authzManager_.dropRole(requestingUser, createDropRoleParams, resp);
-    CatalogOperation.addSummary(resp, "Role has been dropped.");
+    CatalogDdlOperation.addSummary(resp, "Role has been dropped.");
   }
 
   /**
@@ -692,7 +605,7 @@ public class CatalogOpExecutor {
     Preconditions.checkNotNull(resp);
     Preconditions.checkArgument(grantRevokeRoleParams.isIs_grant());
     authzManager_.grantRoleToGroup(requestingUser, grantRevokeRoleParams, resp);
-    CatalogOperation.addSummary(resp, "Role has been granted.");
+    CatalogDdlOperation.addSummary(resp, "Role has been granted.");
   }
 
   /**
@@ -706,7 +619,7 @@ public class CatalogOpExecutor {
     Preconditions.checkNotNull(resp);
     Preconditions.checkArgument(!grantRevokeRoleParams.isIs_grant());
     authzManager_.revokeRoleFromGroup(requestingUser, grantRevokeRoleParams, resp);
-    CatalogOperation.addSummary(resp, "Role has been revoked.");
+    CatalogDdlOperation.addSummary(resp, "Role has been revoked.");
   }
 
   /**
@@ -737,7 +650,7 @@ public class CatalogOpExecutor {
             grantRevokePrivParams.principal_type);
     }
 
-    CatalogOperation.addSummary(resp, "Privilege(s) have been granted.");
+    CatalogDdlOperation.addSummary(resp, "Privilege(s) have been granted.");
   }
 
   /**
@@ -766,7 +679,7 @@ public class CatalogOpExecutor {
             grantRevokePrivParams.principal_type);
     }
 
-    CatalogOperation.addSummary(resp, "Privilege(s) have been revoked.");
+    CatalogDdlOperation.addSummary(resp, "Privilege(s) have been revoked.");
   }
 
   /**
@@ -804,7 +717,7 @@ public class CatalogOpExecutor {
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       msTbl = msClient.getHiveClient().getTable(tblName.getDb(),tblName.getTbl());
     } catch (TException e) {
-      LOG.error(String.format(CatalogOperation.HMS_RPC_ERROR_FORMAT_STR, "getTable") + e.getMessage());
+      LOG.error(String.format(CatalogDdlOperation.HMS_RPC_ERROR_FORMAT_STR, "getTable") + e.getMessage());
     }
     return msTbl;
   }
@@ -825,7 +738,7 @@ public class CatalogOpExecutor {
    * methods in CatalogServiceCatalog.java.
    */
   public TResetMetadataResponse execResetMetadata(TResetMetadataRequest req)
-      throws CatalogException {
+      throws ImpalaException {
     String cmdString = String.format("%s issued by %s",
         req.is_refresh ? "REFRESH":"INVALIDATE",
         req.header != null ? req.header.requesting_user : " unknown user");
@@ -834,23 +747,9 @@ public class CatalogOpExecutor {
     resp.getResult().setCatalog_service_id(JniCatalog.getServiceId());
 
     if (req.isSetDb_name()) {
-      Preconditions.checkState(!catalog_.isBlacklistedDb(req.getDb_name()),
-          String.format("Can't refresh functions in blacklisted database: %s. %s",
-              req.getDb_name(), CatalogOperation.BLACKLISTED_DBS_INCONSISTENT_ERR_STR));
-      // This is a "refresh functions" operation.
-      synchronized (metastoreDdlLock_) {
-        try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
-          List<TCatalogObject> addedFuncs = Lists.newArrayList();
-          List<TCatalogObject> removedFuncs = Lists.newArrayList();
-          catalog_.refreshFunctions(msClient, req.getDb_name(), addedFuncs, removedFuncs);
-          resp.result.setUpdated_catalog_objects(addedFuncs);
-          resp.result.setRemoved_catalog_objects(removedFuncs);
-          resp.result.setVersion(catalog_.getCatalogVersion());
-          for (TCatalogObject removedFn: removedFuncs) {
-            catalog_.getDeleteLog().addRemovedObject(removedFn);
-          }
-        }
-      }
+      RefreshFunctionsOperation refreshFunctionsOperation = new RefreshFunctionsOperation(
+          this, req, resp);
+      refreshFunctionsOperation.execute();
     } else if (req.isSetTable_name()) {
       // Results of an invalidate operation, indicating whether the table was removed
       // from the Metastore, and whether a new database was added to Impala as a result
@@ -1017,7 +916,7 @@ public class CatalogOpExecutor {
       List<FeFsPartition> affectedExistingPartitions = new ArrayList<>();
       List<org.apache.hadoop.hive.metastore.api.Partition> hmsPartitionsStatsUnset =
           Lists.newArrayList();
-      CatalogOperation.addCatalogServiceIdentifiers(catalog_, table, newCatalogVersion);
+      CatalogDdlOperation.addCatalogServiceIdentifiers(catalog_, table, newCatalogVersion);
       if (table.getNumClusteringCols() > 0) {
         // Set of all partition names targeted by the insert that need to be created
         // in the Metastore (partitions that do not currently exist in the catalog).
@@ -1074,7 +973,7 @@ public class CatalogOpExecutor {
               partition.setSd(msTbl.getSd().deepCopy());
               partition.getSd().setSerdeInfo(msTbl.getSd().getSerdeInfo().deepCopy());
               partition.getSd().setLocation(msTbl.getSd().getLocation() + "/" + partName);
-              CatalogOperation.addCatalogServiceIdentifiers(catalog_, msTbl, partition);
+              CatalogDdlOperation.addCatalogServiceIdentifiers(catalog_, msTbl, partition);
               MetastoreShim.updatePartitionStatsFast(partition, msTbl, warehouse);
             }
 
@@ -1206,7 +1105,7 @@ public class CatalogOpExecutor {
         createInsertEvents(table, filesBeforeInsert, affectedExistingPartitions,
             newPartsCreated, update.is_overwrite, txnId, writeId);
       }
-      CatalogOperation.addTableToCatalogUpdate(table, update.header.want_minimal_response,
+      CatalogDdlOperation.addTableToCatalogUpdate(table, update.header.want_minimal_response,
           response.result);
     } finally {
       context.stop();
@@ -1520,7 +1419,7 @@ public class CatalogOpExecutor {
     if (params != null && params.containsKey(StatsSetupConst.COLUMN_STATS_ACCURATE)) {
       params.remove(StatsSetupConst.COLUMN_STATS_ACCURATE);
       try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
-        CatalogOperation.applyAlterTable(metaStoreClient, msTable, false, tblTxn);
+        CatalogDdlOperation.applyAlterTable(metaStoreClient, msTable, false, tblTxn);
       }
     }
   }
@@ -1545,7 +1444,7 @@ public class CatalogOpExecutor {
         }
       } catch (TException te) {
         throw new ImpalaRuntimeException(
-            String.format(CatalogOperation.HMS_RPC_ERROR_FORMAT_STR, "alter_partitions"),
+            String.format(CatalogDdlOperation.HMS_RPC_ERROR_FORMAT_STR, "alter_partitions"),
             te);
       }
     }

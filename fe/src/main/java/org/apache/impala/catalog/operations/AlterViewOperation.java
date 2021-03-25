@@ -15,7 +15,7 @@ import org.apache.impala.thrift.TDdlExecResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class AlterViewOperation extends CatalogOperation {
+public class AlterViewOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(AlterViewOperation.class);
   private long newCatalogVersion;
@@ -31,7 +31,7 @@ public class AlterViewOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -69,7 +69,7 @@ public class AlterViewOperation extends CatalogOperation {
   }
 
   @Override
-  public void before() throws ImpalaException {
+  public void init() throws ImpalaException {
     params = Preconditions.checkNotNull(request.getAlter_view_params());
     TableName tableName = TableName.fromThrift(params.getView_name());
     Preconditions.checkState(tableName.isFullyQualified());
@@ -86,7 +86,7 @@ public class AlterViewOperation extends CatalogOperation {
   }
 
   @Override
-  public void after() {
+  public void cleanUp() {
     catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     tbl.releaseWriteLock();
   }

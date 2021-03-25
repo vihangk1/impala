@@ -33,6 +33,7 @@ public class CreateTableLikeOperation extends CreateTableOperation {
 
   private static final Logger LOG = LoggerFactory
       .getLogger(CreateTableLikeOperation.class);
+  private TCreateTableLikeParams createTableLikeParams;
 
   public CreateTableLikeOperation(TDdlExecRequest ddlExecRequest,
       TDdlExecResponse response,
@@ -42,20 +43,22 @@ public class CreateTableLikeOperation extends CreateTableOperation {
   }
 
   @Override
-  public void before() throws ImpalaException {
-    TCreateTableLikeParams params = request.getCreate_table_like_params();
-    Preconditions.checkNotNull(params);
+  public void init() throws ImpalaException {
+    createTableLikeParams = Preconditions.checkNotNull(request.getCreate_table_like_params());
+    tableName = TableName.fromThrift(createTableLikeParams.getTable_name());
+    Preconditions.checkState(tableName != null && tableName.isFullyQualified());
+    ifNotExists = createTableLikeParams.if_not_exists;
 
     THdfsFileFormat fileFormat =
-        params.isSetFile_format() ? params.getFile_format() : null;
-    String comment = params.isSetComment() ? params.getComment() : null;
-    TableName tblName = TableName.fromThrift(params.getTable_name());
-    TableName srcTblName = TableName.fromThrift(params.getSrc_table_name());
+        createTableLikeParams.isSetFile_format() ? createTableLikeParams.getFile_format() : null;
+    String comment = createTableLikeParams.isSetComment() ? createTableLikeParams.getComment() : null;
+    TableName tblName = TableName.fromThrift(createTableLikeParams.getTable_name());
+    TableName srcTblName = TableName.fromThrift(createTableLikeParams.getSrc_table_name());
     Preconditions.checkState(tblName != null && tblName.isFullyQualified());
     Preconditions.checkState(srcTblName != null && srcTblName.isFullyQualified());
     Preconditions.checkState(!catalog_.isBlacklistedTable(tblName),
         String.format("Can't create blacklisted table: %s. %s", tblName,
-            CatalogOperation.BLACKLISTED_TABLES_INCONSISTENT_ERR_STR));
+            CatalogDdlOperation.BLACKLISTED_TABLES_INCONSISTENT_ERR_STR));
 
     Table srcTable = catalogOpExecutor_.getExistingTable(srcTblName.getDb(), srcTblName.getTbl(),
         "Load source for CREATE TABLE LIKE");
@@ -65,15 +68,15 @@ public class CreateTableLikeOperation extends CreateTableOperation {
         "CREATE TABLE LIKE is not supported for Kudu tables.");
     tbl.setDbName(tblName.getDb());
     tbl.setTableName(tblName.getTbl());
-    tbl.setOwner(params.getOwner());
+    tbl.setOwner(createTableLikeParams.getOwner());
     if (tbl.getParameters() == null) {
       tbl.setParameters(new HashMap<String, String>());
     }
-    if (params.isSetSort_columns() && !params.sort_columns.isEmpty()) {
+    if (createTableLikeParams.isSetSort_columns() && !createTableLikeParams.sort_columns.isEmpty()) {
       tbl.getParameters().put(AlterTableSortByStmt.TBL_PROP_SORT_COLUMNS,
-          Joiner.on(",").join(params.sort_columns));
-      TSortingOrder sortingOrder = params.isSetSorting_order() ?
-          params.sorting_order : TSortingOrder.LEXICAL;
+          Joiner.on(",").join(createTableLikeParams.sort_columns));
+      TSortingOrder sortingOrder = createTableLikeParams.isSetSorting_order() ?
+          createTableLikeParams.sorting_order : TSortingOrder.LEXICAL;
       tbl.getParameters().put(AlterTableSortByStmt.TBL_PROP_SORT_ORDER,
           sortingOrder.toString());
     }
@@ -81,7 +84,7 @@ public class CreateTableLikeOperation extends CreateTableOperation {
       tbl.getParameters().put("comment", comment);
     }
     // The EXTERNAL table property should not be copied from the old table.
-    if (params.is_external) {
+    if (createTableLikeParams.is_external) {
       tbl.setTableType(TableType.EXTERNAL_TABLE.toString());
       tbl.putToParameters("EXTERNAL", "TRUE");
     } else {
@@ -105,7 +108,7 @@ public class CreateTableLikeOperation extends CreateTableOperation {
     // The LOCATION property should not be copied from the old table. If the location
     // is null (the caller didn't specify a custom location) this will clear the value
     // and the table will use the default table location from the parent database.
-    tbl.getSd().setLocation(params.getLocation());
+    tbl.getSd().setLocation(createTableLikeParams.getLocation());
     if (fileFormat != null) {
       setStorageDescriptorFileFormat(tbl.getSd(), fileFormat);
     } else if (srcTable instanceof View) {
@@ -120,5 +123,14 @@ public class CreateTableLikeOperation extends CreateTableOperation {
     LOG.trace(String.format("Creating table %s LIKE %s", tblName, srcTblName));
     // set the newTable from the base class so that we can create it
     newTable = tbl;
+  }
+
+  @Override
+  protected void cleanUp() {
+    if (!ifNotExists && existingTable != null) {
+      // Release the locks held in tryLock().
+      catalog_.getLock().writeLock().unlock();
+      existingTable.releaseWriteLock();
+    }
   }
 }

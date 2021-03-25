@@ -30,7 +30,7 @@ public class CreateViewOperation extends CreateTableOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     TCreateOrAlterViewParams params = request.create_view_params;
     TableName tableName = TableName.fromThrift(params.getView_name());
     Preconditions.checkState(tableName != null && tableName.isFullyQualified());

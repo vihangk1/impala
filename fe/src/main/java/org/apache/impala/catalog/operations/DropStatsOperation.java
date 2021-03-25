@@ -19,7 +19,7 @@ import org.apache.impala.util.AcidUtils;
  * encountered as part of this operation. Acquires a lock on the modified table
  * to protect against concurrent modifications.
  */
-public class DropStatsOperation extends CatalogOperation {
+public class DropStatsOperation extends CatalogDdlOperation {
   private Table table;
   private TDropStatsParams params;
   private long newCatalogVersion;
@@ -33,7 +33,7 @@ public class DropStatsOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -79,7 +79,7 @@ public class DropStatsOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     params = Preconditions.checkNotNull(request.drop_stats_params);
     table = catalogOpExecutor_.getExistingTable(params.getTable_name().getDb_name(),
         params.getTable_name().getTable_name(), "Load for DROP STATS");
@@ -94,7 +94,7 @@ public class DropStatsOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() {
+  protected void cleanUp() {
     catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     table.releaseWriteLock();
   }

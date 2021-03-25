@@ -42,7 +42,7 @@ import org.slf4j.LoggerFactory;
  * @return true if a new table has been created with the given params, false
  * otherwise.
  */
-public class CreateTableOperation extends CatalogOperation {
+public class CreateTableOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(CreateTableOperation.class);
   // protected since this is already needed by CreateTableLikeOperation
@@ -50,10 +50,14 @@ public class CreateTableOperation extends CatalogOperation {
   protected org.apache.hadoop.hive.metastore.api.Table newTable;
   // if the table is set to cached, this field keeps track of the directive id
   private Long cacheDirId;
-  protected TCreateTableParams params;
+  private TCreateTableParams params;
   protected boolean skipHMSOperation;
-  private Table existingTable;
+  protected Table existingTable;
   private boolean takeDdlLock;
+  protected List<SQLPrimaryKey> primaryKeys;
+  protected List<SQLForeignKey> foreignKeys;
+  protected TableName tableName;
+  protected boolean ifNotExists;
 
   public CreateTableOperation(TDdlExecRequest ddlExecRequest,
       TDdlExecResponse response, CatalogOpExecutor catalogOpExecutor,
@@ -79,13 +83,12 @@ public class CreateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return takeDdlLock;
   }
 
   @Override
   protected void doHmsOperations() throws ImpalaException {
-    TableName tableName = TableName.fromThrift(params.getTable_name());
     LOG.trace("Creating table {}", tableName);
     if (skipHMSOperation) {
       alreadyExistsSummary(newTable);
@@ -104,9 +107,6 @@ public class CreateTableOperation extends CatalogOperation {
     Preconditions.checkState(params.getColumns().size() > 0,
         "Empty column list given as argument to Catalog.createTable");
 
-    List<SQLPrimaryKey> primaryKeys = params.primary_keys;
-    List<SQLForeignKey> foreignKeys = params.foreign_keys;
-    boolean if_not_exists = params.if_not_exists;
     THdfsCachingOp cacheOp = params.cache_op;
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       if (primaryKeys == null && foreignKeys == null) {
@@ -144,7 +144,7 @@ public class CreateTableOperation extends CatalogOperation {
             newTable.getDbName(), newTable.getTableName());
       }
     } catch (Exception e) {
-      if (e instanceof AlreadyExistsException && if_not_exists) {
+      if (e instanceof AlreadyExistsException && ifNotExists) {
         alreadyExistsSummary(newTable);
       }
       throw new ImpalaRuntimeException(
@@ -375,16 +375,19 @@ public class CreateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     params = request.getCreate_table_params();
     Preconditions.checkNotNull(params);
-    TableName tableName = TableName.fromThrift(params.getTable_name());
+    tableName = TableName.fromThrift(params.getTable_name());
     Preconditions.checkState(tableName != null && tableName.isFullyQualified());
     Preconditions.checkState(params.getColumns() != null,
         "Null column list given as argument to Catalog.createTable");
     Preconditions.checkState(!catalog_.isBlacklistedTable(tableName),
         String.format("Can't create blacklisted table: %s. %s", tableName,
             BLACKLISTED_TABLES_INCONSISTENT_ERR_STR));
+    primaryKeys = params.primary_keys;
+    foreignKeys = params.foreign_keys;
+    ifNotExists = params.if_not_exists;
     existingTable = catalog_.getTableNoThrow(tableName.getDb(), tableName.getTbl());
     if (params.if_not_exists && existingTable != null) {
       LOG.trace("Skipping table creation because {} already exists and " +
@@ -399,7 +402,7 @@ public class CreateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() {
+  protected void cleanUp() {
     if (params.if_not_exists && existingTable != null) {
       // Release the locks held in tryLock().
       catalog_.getLock().writeLock().unlock();

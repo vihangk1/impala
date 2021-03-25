@@ -92,7 +92,7 @@ import org.apache.thrift.TException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class AlterTableOperation extends CatalogOperation {
+public class AlterTableOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(AlterTableOperation.class);
 
@@ -133,7 +133,7 @@ public class AlterTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -1675,7 +1675,7 @@ public class AlterTableOperation extends CatalogOperation {
   }
 
   @Override
-  public void before() throws ImpalaException {
+  public void init() throws ImpalaException {
     TAlterTableParams params = request.getAlter_table_params();
     TableName tableName = TableName.fromThrift(params.getTable_name());
     tbl = catalogOpExecutor_.getExistingTable(tableName.getDb(), tableName.getTbl(),
@@ -1701,7 +1701,7 @@ public class AlterTableOperation extends CatalogOperation {
   }
 
   @Override
-  public void after() {
+  public void cleanUp() {
     context.stop();
     catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     // Clear in-progress modifications in case of exceptions.

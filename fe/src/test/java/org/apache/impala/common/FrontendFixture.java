@@ -51,6 +51,7 @@ import org.apache.impala.catalog.ScalarType;
 import org.apache.impala.catalog.Table;
 import org.apache.impala.catalog.Type;
 import org.apache.impala.catalog.View;
+import org.apache.impala.catalog.operations.CatalogDdlOperation;
 import org.apache.impala.service.CatalogOpExecutor;
 import org.apache.impala.service.Frontend;
 import org.apache.impala.testutil.ImpaladTestCatalog;
@@ -188,7 +189,7 @@ public class FrontendFixture {
     Db db = catalog_.getDb(createTableStmt.getDb());
     Preconditions.checkNotNull(db, "Test tables must be created in an existing db.");
     org.apache.hadoop.hive.metastore.api.Table msTbl =
-        CatalogOpExecutor.createMetaStoreTable(createTableStmt.toThrift());
+        CatalogDdlOperation.createMetaStoreTable(createTableStmt.toThrift());
     Table dummyTable = Table.fromMetastoreTable(db, msTbl);
     if (dummyTable instanceof HdfsTable) {
       List<ColumnDef> columnDefs = Lists.newArrayList(

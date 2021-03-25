@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory;
  * column and table statistics. Acquires a table lock to protect against concurrent
  * table modifications. TODO truncate specified partitions.
  */
-public class TruncateTableOperation extends CatalogOperation {
+public class TruncateTableOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(TruncateTableOperation.class);
   private final TTruncateParams params;
@@ -65,7 +65,7 @@ public class TruncateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -252,7 +252,7 @@ public class TruncateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     try {
       table = catalogOpExecutor_
           .getExistingTable(tblName.getDb(), tblName.getTbl(),
@@ -283,7 +283,7 @@ public class TruncateTableOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() throws ImpalaException {
+  protected void cleanUp() throws ImpalaException {
     catalogOpExecutor_.UnlockWriteLockIfErronouslyLocked();
     if (table.isWriteLockedByCurrentThread()) {
       table.releaseWriteLock();

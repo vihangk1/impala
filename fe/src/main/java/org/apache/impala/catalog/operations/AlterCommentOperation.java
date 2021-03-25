@@ -21,7 +21,7 @@ import org.apache.impala.thrift.TCommentOnParams;
 import org.apache.impala.thrift.TDdlExecRequest;
 import org.apache.impala.thrift.TDdlExecResponse;
 
-public class AlterCommentOperation extends CatalogOperation {
+public class AlterCommentOperation extends CatalogDdlOperation {
 
   private Db db;
   private TCommentOnParams params;
@@ -40,7 +40,7 @@ public class AlterCommentOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -141,7 +141,7 @@ public class AlterCommentOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     Preconditions.checkState(params.getDb() != null || params.getTable_name() != null
         || params.getColumn_name() != null);
     if (params.getDb() != null) {
@@ -167,7 +167,7 @@ public class AlterCommentOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() throws ImpalaException {
+  protected void cleanUp() throws ImpalaException {
     if (db != null && db.getLock().isHeldByCurrentThread()) {
       db.getLock().unlock();
     } else if (tbl != null && tbl.isWriteLockedByCurrentThread()) {

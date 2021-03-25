@@ -38,7 +38,7 @@ import org.slf4j.LoggerFactory;
  * In case of transactional tables acquires an exclusive HMS table lock before
  * executing the drop operation.
  */
-public class DropTableOrViewOperation extends CatalogOperation {
+public class DropTableOrViewOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory
       .getLogger(DropTableOrViewOperation.class);
@@ -60,7 +60,7 @@ public class DropTableOrViewOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return takeDdlLock;
   }
 
@@ -182,7 +182,7 @@ public class DropTableOrViewOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     tableName = TableName.fromThrift(params.getTable_name());
     Preconditions.checkState(tableName != null && tableName.isFullyQualified());
     Preconditions.checkState(!catalog_.isBlacklistedTable(tableName) || params.if_exists,
@@ -229,7 +229,7 @@ public class DropTableOrViewOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() throws ImpalaException {
+  protected void cleanUp() throws ImpalaException {
     removedObject.setType(TCatalogObjectType.TABLE);
     removedObject.setTable(new TTable());
     removedObject.getTable().setTbl_name(tableName.getTbl());

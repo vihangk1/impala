@@ -30,6 +30,7 @@ import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.catalog.KuduTable;
 import org.apache.impala.catalog.Type;
+import org.apache.impala.catalog.operations.CatalogDdlOperation;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.compat.MetastoreShim;
 import org.apache.impala.rewrite.ExprRewriter;
@@ -208,7 +209,7 @@ public class CreateTableAsSelectStmt extends StatementBase {
     // match the schema of the table that will be created by running the CREATE
     // statement.
     org.apache.hadoop.hive.metastore.api.Table msTbl =
-        CatalogOpExecutor.createMetaStoreTable(createStmt_.toThrift());
+        CatalogDdlOperation.createMetaStoreTable(createStmt_.toThrift());
 
     try {
       // Set a valid location of this table using the same rules as the metastore, unless

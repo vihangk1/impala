@@ -22,7 +22,7 @@ import org.apache.impala.util.FunctionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CreateFunctionOperation extends CatalogOperation {
+public class CreateFunctionOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory
       .getLogger(CreateFunctionOperation.class);
@@ -44,7 +44,7 @@ public class CreateFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -137,7 +137,7 @@ public class CreateFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     params = Preconditions.checkNotNull(request.create_fn_params);
     fn = Function.fromThrift(params.getFn());
     if (LOG.isTraceEnabled()) {
@@ -175,7 +175,7 @@ public class CreateFunctionOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() {
+  protected void cleanUp() {
     db.getLock().unlock();
   }
 }

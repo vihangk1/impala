@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
  * internal cache. Attempts to remove the HDFS cache directives of the underlying
  * tables. Re-throws any HMS exceptions encountered during the drop.
  */
-public class DropDatabaseOperation extends CatalogOperation {
+public class DropDatabaseOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory.getLogger(DropDatabaseOperation.class);
   private final TDropDbParams params;
@@ -46,7 +46,7 @@ public class DropDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return true;
   }
 
@@ -143,7 +143,7 @@ public class DropDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     dbName = params.getDb();
     Preconditions.checkState(dbName != null && !dbName.isEmpty(),
         "Null or empty database name passed as argument to Catalog.dropDatabase");
@@ -166,7 +166,7 @@ public class DropDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  protected void after() {
+  protected void cleanUp() {
     Preconditions.checkNotNull(removedObject);
     response.result.setVersion(removedObject.getCatalog_version());
     response.result.addToRemoved_catalog_objects(removedObject);

@@ -11,7 +11,7 @@ import org.apache.impala.thrift.TDdlExecResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CreateDatasourceOperation extends CatalogOperation {
+public class CreateDatasourceOperation extends CatalogDdlOperation {
 
   private static final Logger LOG = LoggerFactory
       .getLogger(CreateDatasourceOperation.class);
@@ -24,7 +24,7 @@ public class CreateDatasourceOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -60,12 +60,12 @@ public class CreateDatasourceOperation extends CatalogOperation {
   }
 
   @Override
-  protected void before() throws ImpalaException {
+  protected void init() throws ImpalaException {
     // no-op
   }
 
   @Override
-  protected void after() {
+  protected void cleanUp() {
     // no-op
   }
 }

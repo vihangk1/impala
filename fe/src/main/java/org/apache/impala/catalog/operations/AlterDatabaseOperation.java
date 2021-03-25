@@ -14,7 +14,7 @@ import org.apache.impala.thrift.TAlterDbType;
 import org.apache.impala.thrift.TDdlExecRequest;
 import org.apache.impala.thrift.TDdlExecResponse;
 
-public class AlterDatabaseOperation extends CatalogOperation {
+public class AlterDatabaseOperation extends CatalogDdlOperation {
 
   // current we only support alter database owner
   private final TAlterDbSetOwnerParams params;
@@ -39,7 +39,7 @@ public class AlterDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  protected boolean takeDdlLock() {
+  protected boolean requiresDdlLock() {
     return false;
   }
 
@@ -74,7 +74,7 @@ public class AlterDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  public void before() throws ImpalaException {
+  public void init() throws ImpalaException {
     TAlterDbParams params = request.getAlter_db_params();
     Preconditions.checkNotNull(params);
     if (params.getAlter_type() != TAlterDbType.SET_OWNER) {
@@ -101,7 +101,7 @@ public class AlterDatabaseOperation extends CatalogOperation {
   }
 
   @Override
-  public void after() {
+  public void cleanUp() {
     db.getLock().unlock();
   }
 }
