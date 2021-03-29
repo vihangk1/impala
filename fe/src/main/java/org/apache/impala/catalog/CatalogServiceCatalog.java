@@ -1379,6 +1379,8 @@ public class CatalogServiceCatalog extends Catalog {
     final int maxAttempts = 2;
     int attemptCount = 0;
     boolean lockAcquired;
+    long newPendingVersion = -1;
+    boolean pendingVersionUpdated;
     do {
       attemptCount++;
       // topicUpdateTblLockMaxWaitTimeMs indicates the total amount of time we are willing
@@ -1405,8 +1407,9 @@ public class CatalogServiceCatalog extends Catalog {
       // unlucky again and some other write operation has acquired the tbl lock. In such
       // a case it is guaranteed that the tbl version will be updated outside current
       // window of the topic updates and it is safe to skip the table.
-      boolean pendingVersionUpdated = hdfsTable
-          .updatePendingVersion(tblVersion, incrementAndGetCatalogVersion());
+      newPendingVersion = incrementAndGetCatalogVersion();
+      pendingVersionUpdated = hdfsTable
+          .updatePendingVersion(tblVersion, newPendingVersion);
       if (pendingVersionUpdated) break;
       // if pendingVersionUpdated is false it means that tblVersion has been changed
       // and hence we didn't update the pendingVersion. We retry once to acquire a read
@@ -1417,9 +1420,12 @@ public class CatalogServiceCatalog extends Catalog {
     TopicUpdateLog.Entry topicUpdateEntry = topicUpdateLog_
         .getOrCreateLogEntry(hdfsTable.getUniqueName());
     LOG.info(
-        "Table {} (version={}, lastSeen={}) is skipping topic update ({}, {}] "
+        "Table {} (version={}, lastSeen={}, pendingVersion={}, pendingVersionUpdated={}) "
+            + "is skipping topic update ({}, {}] "
             + "due to lock contention", hdfsTable.getFullName(), tblVersion,
-        hdfsTable.getLastVersionSeenByTopicUpdate(), ctx.fromVersion, ctx.toVersion);
+        hdfsTable.getLastVersionSeenByTopicUpdate(), newPendingVersion,
+        pendingVersionUpdated, ctx.fromVersion,
+        ctx.toVersion);
     if (hdfsTable.getLastVersionSeenByTopicUpdate() != tblVersion) {
       // if the last version skipped by topic update is not same as the last version
       // sent, it means the table was updated and topic update thread is lagging
