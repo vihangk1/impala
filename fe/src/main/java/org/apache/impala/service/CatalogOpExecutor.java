@@ -5714,6 +5714,8 @@ public class CatalogOpExecutor {
       }
       loadTableMetadata(table, newCatalogVersion, true, false, partsToLoadMetadata,
           "INSERT");
+      addTableToCatalogUpdate(table, update.header.want_minimal_response,
+          response.result);
       // After loading metadata, fire insert events if external event processing is
       // enabled.
       if (!skipTransactionalInsertEvent) {
@@ -5726,8 +5728,6 @@ public class CatalogOpExecutor {
         createInsertEvents(table, filesBeforeInsert, affectedExistingPartitions,
             newPartsCreated, update.is_overwrite, txnId, writeId);
       }
-      addTableToCatalogUpdate(table, update.header.want_minimal_response,
-          response.result);
     } finally {
       context.stop();
       UnlockWriteLockIfErronouslyLocked();
