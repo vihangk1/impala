@@ -191,4 +191,5 @@ struct TBackendGflags {
   83: required bool saml2_ee_test_mode
 
   84: required string scratch_dirs
+  86: required i32 max_wait_time_for_sync_ddl_s
 }
