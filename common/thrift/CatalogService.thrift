@@ -185,6 +185,9 @@ struct TDdlExecResponse {
   // created table. This is useful for establishing lineage between table and it's
   // location for external tables.
   6: optional string table_location
+
+  // If this is set, coordinator should resend the DDL request to this catalog.
+  7: optional string catalog_address
 }
 
 // Updates the metastore with new partition information and returns a response

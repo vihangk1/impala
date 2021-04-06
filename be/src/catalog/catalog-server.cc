@@ -300,20 +300,21 @@ void CatalogServer::UpdateCatalogMembershipCallback(
         LOG(INFO) << "VIHANG-DEBUG: Membership topic didn't contain any deltas";
         return;
     } else {
-        const TTopicDelta& update = topic->second;
-        if (!update.topic_entries.empty()) {
-            for (const TTopicItem& item : update.topic_entries) {
-                //LOG(INFO) << "VIHANG-DEBUG: Item key: " << item.key << " value: " << item.value;
-                TUpdateRingNodeRequest req;
-                req.removed = false;
-                // need to decide if we want to use serviceUrl or serviceId
-                req.serviceId = item.key;
-                Status s = catalog_->UpdateRingNode(req);
-                if (!s.ok()) {
-                    LOG(ERROR) << "Failed the update the consistent hash ring for " << item.key;
-                }
-            }
-        } else {
+      const TTopicDelta& update = topic->second;
+      if (!update.topic_entries.empty()) {
+        for (const TTopicItem& item : update.topic_entries) {
+          // LOG(INFO) << "VIHANG-DEBUG: Item key: " << item.key << " value: " <<
+          // item.value;
+          TUpdateRingNodeRequest req;
+          req.removed = false;
+          // need to decide if we want to use serviceUrl or serviceId
+          req.serviceId = item.key;
+          Status s = catalog_->UpdateRingNode(req);
+          if (!s.ok()) {
+            LOG(ERROR) << "Failed the update the consistent hash ring for " << item.key;
+          }
+        }
+      } else {
             LOG(INFO) << "VIHANG-DEBUG: topic entries is empty";
         }
         //LOG(INFO) << "VIHANG-DEBUG: Received cluster membership update";
@@ -333,7 +334,7 @@ void CatalogServer::AddCatalogServerStatusToStatestore(vector<TTopicDelta>* subs
 
     TTopicItem& item = update.topic_entries.back();
     TNetworkAddress server_address = MakeNetworkAddress(FLAGS_hostname,
-                                                        FLAGS_catalog_service_port);
+        FLAGS_catalog_service_port);
     string itemKey = TNetworkAddressToString(server_address);
     item.key = itemKey;
     item.value = itemKey;

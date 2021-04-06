@@ -77,6 +77,7 @@ import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.Column;
 import org.apache.impala.catalog.ColumnNotFoundException;
 import org.apache.impala.catalog.ColumnStats;
+import org.apache.impala.catalog.ConsistentHashRing;
 import org.apache.impala.catalog.DataSource;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeCatalogUtils;
@@ -344,6 +345,7 @@ public class CatalogOpExecutor {
     TDdlType ddl_type = ddlRequest.ddl_type;
     try {
       boolean syncDdl = ddlRequest.isSync_ddl();
+      String catalogServiceId;
       LOG.info("Received a DDL request of type: {} SyncDDL: {}", ddl_type, syncDdl);
       switch (ddl_type) {
         case ALTER_DATABASE:
@@ -367,6 +369,12 @@ public class CatalogOpExecutor {
         case CREATE_DATABASE:
           TCreateDbParams create_db_params = ddlRequest.getCreate_db_params();
           tTableName = Optional.of(new TTableName(create_db_params.db, ""));
+          catalogServiceId = findServiceId(create_db_params.db);
+          if (catalogServiceId != null) {
+            // This table does not belong to this catalog. Return the service id in the
+            // response.
+            response.setCatalog_address(catalogServiceId);
+          }
           catalogOpMetric_.increment(ddl_type, tTableName);
           createDatabase(create_db_params, response);
           break;
@@ -381,6 +389,14 @@ public class CatalogOpExecutor {
         case CREATE_TABLE:
           TCreateTableParams create_table_params = ddlRequest.getCreate_table_params();
           tTableName = Optional.of((create_table_params.getTable_name()));
+          catalogServiceId = findServiceId(TableName.fromThrift(
+              create_table_params.getTable_name()).getTbl());
+          if (catalogServiceId != null) {
+            // This table does not belong to this catalog. Return the service id in the
+            // response.
+            response.setCatalog_address(catalogServiceId);
+            break;
+          }
           catalogOpMetric_.increment(ddl_type, tTableName);
           createTable(ddlRequest.getCreate_table_params(), response, syncDdl);
           break;
@@ -501,7 +517,9 @@ public class CatalogOpExecutor {
       // will handle setting a bad status code.
       response.getResult().setStatus(new TStatus(TErrorCode.OK, new ArrayList<String>()));
     } finally {
-      catalogOpMetric_.decrement(ddl_type, tTableName);
+      if (response.getCatalog_address() == null) {
+        catalogOpMetric_.decrement(ddl_type, tTableName);
+      }
     }
     return response;
   }
@@ -625,6 +643,15 @@ public class CatalogOpExecutor {
     }
   }
 
+  /**
+   * Util method to find the service id this object belongs to if it does not belong to
+   * this catalog. Returns null if the object belongs to this catalog.
+   */
+  private String findServiceId(String objName) {
+    String serviceId = ConsistentHashRing.INSTANCE.getServiceId(objName);
+    return  objName == null || serviceId.equals(
+        getCatalog().getCatalogServiceAddress()) ? null : serviceId;
+  }
   /**
    * Execute the ALTER TABLE command according to the TAlterTableParams and refresh the
    * table metadata, except for RENAME, ADD PARTITION and DROP PARTITION. This call is

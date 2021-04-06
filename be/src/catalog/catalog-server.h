@@ -59,7 +59,6 @@ class Catalog;
 class CatalogServer {
  public:
   static std::string IMPALA_CATALOG_TOPIC;
-  static std::string IMPALA_CATALOG_MEMBERSHIP_TOPIC;
   CatalogServer(MetricGroup* metrics);
 
   /// Starts this CatalogService instance.
