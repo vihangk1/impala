@@ -933,7 +933,7 @@ class TestHmsIntegration(ImpalaTestSuite):
                               'Could not resolve path')
 
   @pytest.mark.execute_serially
-  def test_add_overlapping_partitions(self, vector):
+  def test_add_overlapping_partitions(self, vector, cluster_properties):
     """
     IMPALA-1670, IMPALA-4141: Test interoperability with Hive when adding overlapping
     partitions to a table
