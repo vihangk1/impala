@@ -17,6 +17,11 @@
 
 package org.apache.impala.catalog.events;
 
+import org.apache.hadoop.hive.metastore.api.NotificationEvent;
+import org.apache.impala.catalog.CatalogException;
+import org.apache.impala.catalog.events.MetastoreEvents.IgnoredEvent;
+import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEvent;
+import org.apache.impala.catalog.events.MetastoreEvents.MetastoreEventFactory;
 import org.apache.impala.catalog.events.MetastoreEventsProcessor.EventProcessorStatus;
 import org.apache.impala.thrift.TEventProcessorMetrics;
 import org.apache.impala.thrift.TEventProcessorMetricsSummaryResponse;
@@ -85,5 +90,15 @@ public class NoOpEventProcessor implements ExternalEventsProcessor {
   @Override
   public TEventProcessorMetricsSummaryResponse getEventProcessorSummary() {
     return DEFAULT_SUMMARY_RESPONSE;
+  }
+
+  @Override
+  public EventFactory getEventsFactory() {
+    return hmsEvent -> null;
+  }
+
+  @Override
+  public DeleteEventLog getDeleteEventLog() {
+    return new DeleteEventLog();
   }
 }
