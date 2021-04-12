@@ -14,7 +14,7 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-
+import logging
 import random
 import string
 import pytest
@@ -93,85 +93,93 @@ class TestEventProcessing(CustomClusterTestSuite):
 
   @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")
   @SkipIfHive2.acid
-  def test_transactional_insert_events(self):
+  def test_transactional_insert_events(self, unique_database):
     """Executes 'run_test_insert_events' for transactional tables.
     """
-    self.run_test_insert_events(is_transactional=True)
+    self.run_test_insert_events(unique_database, is_transactional=True)
 
   @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")
-  def test_insert_events(self):
+  def test_insert_events(self, unique_database):
     """Executes 'run_test_insert_events' for non-transactional tables.
     """
-    self.run_test_insert_events()
+    self.run_test_insert_events(unique_database)
 
-  def run_test_insert_events(self, is_transactional=False):
+  def run_test_insert_events(self, unique_database, is_transactional=False):
     """Test for insert event processing. Events are created in Hive and processed in
     Impala. The following cases are tested :
     Insert into table --> for partitioned and non-partitioned table
     Insert overwrite table --> for partitioned and non-partitioned table
     Insert into partition --> for partitioned table
     """
-    db_name = self.__get_random_name("insert_event_db_")
-    tblproperties = self.__get_transactional_tblproperties(is_transactional)
-    with HiveDbWrapper(self, db_name):
-      # Test table with no partitions.
-      test_tbl_name = 'tbl_insert_nopart'
-      self.run_stmt_in_hive("drop table if exists %s.%s" % (db_name, test_tbl_name))
-      self.run_stmt_in_hive("create table %s.%s (id int, val int) %s"
-         % (db_name, test_tbl_name, tblproperties))
-      # Test insert into table, this will fire an insert event.
-      self.run_stmt_in_hive("insert into %s.%s values(101, 200)"
-         % (db_name, test_tbl_name))
-      # With MetastoreEventProcessor running, the insert event will be processed. Query
-      # the table from Impala.
-      EventProcessorUtils.wait_for_event_processing(self)
-      # Verify that the data is present in Impala.
-      data = self.execute_scalar("select * from %s.%s" % (db_name, test_tbl_name))
-      assert data.split('\t') == ['101', '200']
+    # Test table with no partitions.
+    TBL_INSERT_NOPART = 'tbl_insert_nopart'
+    self.run_stmt_in_hive(
+      "drop table if exists %s.%s" % (unique_database, TBL_INSERT_NOPART))
+    TBLPROPERTIES = ""
+    if is_transactional:
+      TBLPROPERTIES = "TBLPROPERTIES ('transactional'='true'," \
+          "'transactional_properties'='insert_only')"
+    self.run_stmt_in_hive("create table %s.%s (id int, val int) %s"
+        % (unique_database, TBL_INSERT_NOPART, TBLPROPERTIES))
+    # Test insert into table, this will fire an insert event.
+    self.run_stmt_in_hive("insert into %s.%s values(101, 200)"
+        % (unique_database, TBL_INSERT_NOPART))
+    # With MetastoreEventProcessor running, the insert event will be processed. Query the
+    # table from Impala.
+    EventProcessorUtils.wait_for_event_processing(self)
+    # Verify that the data is present in Impala.
+    data = self.execute_scalar("select * from %s.%s" %
+        (unique_database, TBL_INSERT_NOPART))
+    assert data.split('\t') == ['101', '200']
 
-      # Test insert overwrite. Overwrite the existing value.
-      self.run_stmt_in_hive("insert overwrite table %s.%s values(101, 201)"
-         % (db_name, test_tbl_name))
-      # Make sure the event has been processed.
-      EventProcessorUtils.wait_for_event_processing(self)
-      # Verify that the data is present in Impala.
-      data = self.execute_scalar("select * from %s.%s" % (db_name, test_tbl_name))
-      assert data.split('\t') == ['101', '201']
+    # Test insert overwrite. Overwrite the existing value.
+    self.run_stmt_in_hive("insert overwrite table %s.%s values(101, 201)"
+        % (unique_database, TBL_INSERT_NOPART))
+    # Make sure the event has been processed.
+    EventProcessorUtils.wait_for_event_processing(self)
+    # Verify that the data is present in Impala.
+    data = self.execute_scalar("select * from %s.%s" %
+        (unique_database, TBL_INSERT_NOPART))
+    assert data.split('\t') == ['101', '201']
 
-      # Test partitioned table.
-      test_part_tblname = 'tbl_insert_part'
-      self.run_stmt_in_hive("drop table if exists %s.%s" % (db_name, test_part_tblname))
-      self.run_stmt_in_hive("create table %s.%s (id int, name string) "
-         "partitioned by(day int, month int, year int) %s"
-         % (db_name, test_part_tblname, tblproperties))
-      # Insert data into partitions.
-      self.run_stmt_in_hive("insert into %s.%s partition(day=28, month=03, year=2019)"
-         "values(101, 'x')" % (db_name, test_part_tblname))
-      # Make sure the event has been processed.
-      EventProcessorUtils.wait_for_event_processing(self)
-      # Verify that the data is present in Impala.
-      data = self.execute_scalar("select * from %s.%s" % (db_name, test_part_tblname))
-      assert data.split('\t') == ['101', 'x', '28', '3', '2019']
+    # Test partitioned table.
+    TBL_INSERT_PART = 'tbl_insert_part'
+    self.run_stmt_in_hive("drop table if exists %s.%s"
+        % (unique_database, TBL_INSERT_PART))
+    self.run_stmt_in_hive("create table %s.%s (id int, name string) "
+        "partitioned by(day int, month int, year int) %s"
+        % (unique_database, TBL_INSERT_PART, TBLPROPERTIES))
+    # Insert data into partitions.
+    self.run_stmt_in_hive("insert into %s.%s partition(day=28, month=03, year=2019)"
+        "values(101, 'x')" % (unique_database, TBL_INSERT_PART))
+    # Make sure the event has been processed.
+    EventProcessorUtils.wait_for_event_processing(self)
+    # Verify that the data is present in Impala.
+    data = self.execute_scalar("select * from %s.%s" % (unique_database, TBL_INSERT_PART))
+    assert data.split('\t') == ['101', 'x', '28', '3', '2019']
 
-      # Test inserting into existing partitions.
-      self.run_stmt_in_hive("insert into %s.%s partition(day=28, month=03, year=2019)"
-         "values(102, 'y')" % (db_name, test_part_tblname))
-      EventProcessorUtils.wait_for_event_processing(self)
-      # Verify that the data is present in Impala.
-      data = self.execute_scalar("select count(*) from %s.%s where day=28 and month=3 "
-         "and year=2019" % (db_name, test_part_tblname))
-      assert data.split('\t') == ['2']
+    # Test inserting into existing partitions.
+    self.run_stmt_in_hive("insert into %s.%s partition(day=28, month=03, year=2019)"
+        "values(102, 'y')" % (unique_database, TBL_INSERT_PART))
+    EventProcessorUtils.wait_for_event_processing(self)
+    # Verify that the data is present in Impala.
+    data = self.execute_scalar("select count(*) from %s.%s where day=28 and month=3 "
+        "and year=2019" % (unique_database, TBL_INSERT_PART))
+    assert data.split('\t') == ['2']
 
-      # Test insert overwrite into existing partitions
-      self.run_stmt_in_hive("insert overwrite table %s.%s partition(day=28, month=03, "
-         "year=2019)" "values(101, 'z')" % (db_name, test_part_tblname))
-      EventProcessorUtils.wait_for_event_processing(self)
-      # Verify that the data is present in Impala.
-      data = self.execute_scalar("select * from %s.%s where day=28 and month=3 and"
-         " year=2019 and id=101" % (db_name, test_part_tblname))
-      assert data.split('\t') == ['101', 'z', '28', '3', '2019']
+    # Test insert overwrite into existing partitions
+    self.run_stmt_in_hive("insert overwrite table %s.%s partition(day=28, month=03, "
+        "year=2019)" "values(101, 'z')" % (unique_database, TBL_INSERT_PART))
+    EventProcessorUtils.wait_for_event_processing(self)
+    # Verify that the data is present in Impala.
+    data = self.execute_scalar("select * from %s.%s where day=28 and month=3 and"
+        " year=2019 and id=101" % (unique_database, TBL_INSERT_PART))
+    assert data.split('\t') == ['101', 'z', '28', '3', '2019']
 
-  @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+     catalogd_args="--hms_event_polling_interval_s=1"
+  )
   @SkipIfHive2.acid
   def test_empty_partition_events_transactional(self, unique_database):
     self._run_test_empty_partition_events(unique_database, True)
@@ -188,6 +196,108 @@ class TestEventProcessing(CustomClusterTestSuite):
     refreshed"""
     self.__run_self_events_test(unique_database, True)
     self.__run_self_events_test(unique_database, False)
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    catalogd_args="--hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    impalad_args="--use_local_catalog=true",
+    catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_local_catalog_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
+
+  def __run_create_drop_test(self, db, type, rename=False, renameDb=False):
+    NUM_ITERS = 200
+    if type == "table":
+      if not rename:
+        queries = [
+          "create table {0}.test_{1} (i int)".format(db, 1),
+          "drop table {0}.test_{1}".format(db, 1)
+        ]
+      else:
+        db_1 = "{}_1".format(db)
+        if renameDb:
+          self.execute_query_expect_success(self.create_impala_client(),
+            "drop database if exists {0} cascade".format(db_1))
+          self.execute_query_expect_success(self.create_impala_client(),
+            "create database {0}".format(db_1))
+        self.execute_query_expect_success(self.create_impala_client(),
+          "create table if not exists {0}.rename_test_1 (i int)".format(db))
+        if renameDb:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db, db_1),
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db_1, db)
+          ]
+        else:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {0}.rename_test_2".format(db),
+            "alter table {0}.rename_test_2 rename to {0}.rename_test_1".format(db)
+          ]
+      create_metric_name = "tables-added"
+      removed_metric_name = "tables-removed"
+    elif type == "database":
+      self.execute_query_expect_success(self.create_impala_client(),
+        "drop database if exists {0}".format("test_create_drop_db"))
+      queries = [
+        "create database {db}".format(db="test_create_drop_db"),
+        "drop database {db}".format(db="test_create_drop_db")
+      ]
+      create_metric_name = "databases-added"
+      removed_metric_name = "databases-removed"
+    else:
+      tbl_name = "test_create_drop_partition"
+      self.execute_query_expect_success(self.create_impala_client(),
+        "create table {db}.{tbl} (c int) partitioned by (p int)".format(
+          db=db, tbl=tbl_name))
+      queries = [
+        "alter table {db}.{tbl} add partition (p=1)".format(db=db, tbl=tbl_name),
+        "alter table {db}.{tbl} drop partition (p=1)".format(db=db, tbl=tbl_name)
+      ]
+      create_metric_name = "partitions-added"
+      removed_metric_name = "partitions-removed"
+
+    # get the metric before values
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_before = EventProcessorUtils.\
+      get_event_processor_metric('events-skipped', 0)
+    for iter in xrange(NUM_ITERS):
+      for q in queries:
+        try:
+          self.execute_query_expect_success(self.create_impala_client(), q)
+        except Exception, e:
+          print("Failed in {} iterations. Error {}".format(iter, str(e)))
+          raise
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_after = EventProcessorUtils. \
+      get_event_processor_metric('events-skipped', 0)
+    assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+    # None of the queries above should actually trigger a add/remove object from events
+    assert int(create_metric_val_after) == int(create_metric_val_before)
+    assert int(removed_metric_val_after) == int(removed_metric_val_before)
+    # each query set generates 2 events and both of them should be skipped
+    assert int(events_skipped_after) == NUM_ITERS * 2 + int(events_skipped_before)
 
   @pytest.mark.xfail(run=False, reason="This is failing due to HIVE-23995")
   @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")
@@ -420,6 +530,8 @@ class TestEventProcessing(CustomClusterTestSuite):
       queries = self.__get_impala_test_queries(db_name, recover_tbl_name)
       # some queries do not trigger self-event evaluation (creates and drops) however,
       # its still good to confirm that we don't do unnecessary refreshes in such cases
+      # For such queries we use a different metrics events-skipped to confirm that these
+      # events are skipped.
       for stmt in queries[False]:
         self.__exec_sql_and_check_selfevent_counter(stmt, use_impala, False)
       # All the queries with True key should confirm that the self-events-skipped counter
@@ -437,6 +549,7 @@ class TestEventProcessing(CustomClusterTestSuite):
     acid_no_part_tbl_name = self.__get_random_name("acid_no_part_tbl_")
     tbl2 = self.__get_random_name("tbl_")
     view_name = self.__get_random_name("view_")
+    view2 = self.__get_random_name("view_")
     # create a empty table for both partitioned and unpartitioned case for testing insert
     # events
     empty_unpartitioned_tbl = self.__get_random_name("insert_test_tbl_")
@@ -467,21 +580,10 @@ class TestEventProcessing(CustomClusterTestSuite):
           "alter table {0}.{1} DROP COLUMN c3".format(db_name, tbl_name),
           "alter table {0}.{1} set owner user `test-user`".format(db_name, tbl_name),
           "alter table {0}.{1} set owner role `test-role`".format(db_name, tbl_name),
-          "alter table {0}.{1} rename to {0}.{2}".format(db_name, tbl_name, tbl2),
           "alter view {0}.{1} set owner user `test-view-user`".format(db_name, view_name),
           "alter view {0}.{1} set owner role `test-view-role`".format(db_name, view_name),
-          "alter view {0}.{1} rename to {0}.{2}".format(db_name, view_name,
-                                                        self.__get_random_name("view_")),
-          # ADD_PARTITION cases
-          # dynamic partition insert (creates new partitions)
-          "insert into table {0}.{1} partition (year,month) "
-          "select * from functional.alltypessmall".format(db_name, tbl2),
-          # add partition
-          "alter table {0}.{1} add if not exists partition (year=1111, month=1)".format(
-            db_name, tbl2),
           # compute stats will generates ALTER_PARTITION
-          "compute stats {0}.{1}".format(db_name, tbl2),
-          "alter table {0}.{1} recover partitions".format(db_name, recover_tbl_name),
+          "compute stats {0}.{1}".format(db_name, tbl_name),
           # insert into a existing partition; generates INSERT self-event
           "insert into table {0}.{1} partition "
           "(year, month) select * from functional.alltypessmall where year=2009 "
@@ -489,14 +591,24 @@ class TestEventProcessing(CustomClusterTestSuite):
           # insert overwrite query from Impala also generates a INSERT self-event
           "insert overwrite table {0}.{1} partition "
           "(year, month) select * from functional.alltypessmall where year=2009 "
-          "and month=1".format(db_name, tbl2),
-          ],
+          "and month=1".format(db_name, tbl2)],
       # Queries which will not increment the self-events-skipped counter
       False: [
           "create table {0}.{1} like functional.alltypessmall "
           "stored as parquet".format(db_name, tbl_name),
           "create view {0}.{1} as select * from functional.alltypessmall "
-            "where year=2009".format(db_name, view_name),
+          "where year=2009".format(db_name, view_name),
+          # in case of rename we process it as drop+create and hence
+          # the self-event counter is not updated. Instead if this event is processed,
+          # it will increment the tables-added and tables-removed counters.
+          "alter table {0}.{1} rename to {0}.{2}".format(db_name, tbl_name, tbl2),
+          "alter table {0}.{1} rename to {0}.{2}".format(db_name, tbl2, tbl_name),
+          "alter view {0}.{1} rename to {0}.{2}".format(db_name, view_name, view2),
+          "alter view {0}.{1} rename to {0}.{2}".format(db_name, view2, view_name),
+          # ADD_PARTITION cases
+          # dynamic partition insert (creates new partitions)
+          "insert into table {0}.{1} partition (year,month) "
+          "select * from functional.alltypessmall".format(db_name, tbl_name),
           # we add this statement below just to make sure that the subsequent statement is
           # a no-op
           "alter table {0}.{1} add if not exists partition (year=2100, month=1)".format(
@@ -543,6 +655,8 @@ class TestEventProcessing(CustomClusterTestSuite):
             "from functional.alltypestiny".format(db_name, acid_tbl_name),
           "insert overwrite {0}.{1} partition(part) select * from {0}.{1}".format(
             db_name, acid_tbl_name),
+          # recover partitions will generate add_partition events
+          "alter table {0}.{1} recover partitions".format(db_name, recover_tbl_name)
       ]
     }
     return self_event_test_queries
@@ -610,8 +724,10 @@ class TestEventProcessing(CustomClusterTestSuite):
       'partitions-refreshed', 0)
     self_events_count = EventProcessorUtils.get_event_processor_metric(
       'self-events-skipped', 0)
+    events_skipped_count = EventProcessorUtils.get_event_processor_metric(
+      'events-skipped', 0)
     return int(self_events_count), int(tbls_refreshed_count), int(
-      partitions_refreshed_count)
+      partitions_refreshed_count), int(events_skipped_count)
 
   def __exec_sql_and_check_selfevent_counter(self, stmt, use_impala_client,
                                              check_self_event_counter=True):
@@ -621,15 +737,19 @@ class TestEventProcessing(CustomClusterTestSuite):
     expected based on whether we expect a self-event or not. If the
     check_self_event_counter is False it skips checking the self-events-skipped metric.
     """
-    self_events, tbls_refreshed, partitions_refreshed = self.__get_self_event_metrics()
+    self_events, tbls_refreshed, partitions_refreshed,\
+      events_skipped = self.__get_self_event_metrics()
+    last_synced_event = EventProcessorUtils.get_last_synced_event_id()
+    logging.info("Running statement: {0}".format(stmt))
     if not use_impala_client:
       self.run_stmt_in_hive(stmt)
     else:
       self.client.execute(stmt)
 
     EventProcessorUtils.wait_for_event_processing(self)
-    self_events_after, tbls_refreshed_after, partitions_refreshed_after = \
-      self.__get_self_event_metrics()
+    self_events_after, tbls_refreshed_after, partitions_refreshed_after,\
+      events_skipped_after = self.__get_self_event_metrics()
+    last_synced_event_after = EventProcessorUtils.get_last_synced_event_id()
     # we assume that any event which comes due to stmts run from impala-client are
     # self-events
     if use_impala_client:
@@ -637,6 +757,11 @@ class TestEventProcessing(CustomClusterTestSuite):
       # check_self_event_counter is set
       if check_self_event_counter:
         assert self_events_after > self_events
+      else:
+        # some of the test queries generate no events at all. If that is the case
+        # skip the below comparison
+        if last_synced_event_after > last_synced_event:
+          assert events_skipped_after > events_skipped
       # if this is a self-event, no table or partitions should be refreshed
       assert tbls_refreshed == tbls_refreshed_after
       assert partitions_refreshed == partitions_refreshed_after

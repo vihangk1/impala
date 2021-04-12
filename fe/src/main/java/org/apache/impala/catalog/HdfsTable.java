@@ -41,6 +41,7 @@ import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.hive.common.FileUtils;
 import org.apache.hadoop.hive.common.ValidTxnList;
 import org.apache.hadoop.hive.common.ValidWriteIdList;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -547,6 +548,17 @@ public class HdfsTable extends Table implements FeFsTable {
   }
 
   /**
+   * Get the partition by the given list of partValues.
+   */
+  public HdfsPartition getPartition(List<LiteralExpr> partValues) {
+    Map<List<LiteralExpr>, HdfsPartition> existingPartitions = Maps.newHashMap();
+    for (HdfsPartition partition: partitionMap_.values()) {
+      existingPartitions.put(partition.getPartitionValues(), partition);
+    }
+    return existingPartitions.get(partValues);
+  }
+
+  /**
    * Gets the HdfsPartition matching the Thrift version of the partition spec.
    * Returns null if no match was found.
    */
@@ -832,20 +844,31 @@ public class HdfsTable extends Table implements FeFsTable {
    * Partitions may be empty, or may not even exist in the filesystem (a partition's
    * location may have been changed to a new path that is about to be created by an
    * INSERT). Also loads the file metadata for this partition. Returns new partition
-   * if successful or null if none was created.
+   * if successful or null if none was created. If the map of Partition name to eventID
+   * is not null, it uses it to set the {@code createEventId_} of the
+   * HdfsPartition.
    *
    * Throws CatalogException if one of the supplied storage descriptors contains metadata
    * that Impala can't understand.
    */
   public List<HdfsPartition> createAndLoadPartitions(IMetaStoreClient client,
-      List<org.apache.hadoop.hive.metastore.api.Partition> msPartitions)
-      throws CatalogException {
+      List<org.apache.hadoop.hive.metastore.api.Partition> msPartitions,
+      @Nullable Map<String, Long> msPartitionsToEventId) throws CatalogException {
     List<HdfsPartition.Builder> addedPartBuilders = new ArrayList<>();
     FsPermissionCache permCache = preloadPermissionsCache(msPartitions);
     for (org.apache.hadoop.hive.metastore.api.Partition partition: msPartitions) {
       HdfsPartition.Builder partBuilder = createPartitionBuilder(partition.getSd(),
           partition, permCache);
       Preconditions.checkNotNull(partBuilder);
+      long eventId = -1L;
+      if (msPartitionsToEventId != null) {
+        String partName = FeCatalogUtils.getPartitionName(this, partition.getValues());
+        if (!msPartitionsToEventId.containsKey(partName)) {
+          LOG.warn("Create event id for partition {} not found. Using -1.", partName);
+        }
+        eventId = msPartitionsToEventId.getOrDefault(partName, -1L);
+      }
+      partBuilder.setCreateEventId(eventId);
       addedPartBuilders.add(partBuilder);
     }
     loadFileMetadataForPartitions(client, addedPartBuilders, /*isRefresh=*/false);
@@ -1065,7 +1088,7 @@ public class HdfsTable extends Table implements FeFsTable {
     return partition;
   }
 
-  private HdfsPartition dropPartition(HdfsPartition partition) {
+  public HdfsPartition dropPartition(HdfsPartition partition) {
     return dropPartition(partition, true);
   }
 
@@ -2383,6 +2406,29 @@ public class HdfsTable extends Table implements FeFsTable {
   }
 
   /**
+   * Returns a list of {@link LiteralExpr} which is type compatible with the partition
+   * keys of this table. This is useful to convert the string values which are received
+   * from metastore events to {@link LiteralExpr}.
+   */
+  public List<LiteralExpr> getTypeCompatiblePartValues(List<String> values)
+      throws UnsupportedEncodingException {
+    List<LiteralExpr> result = new ArrayList<>();
+    List<Column> partitionColumns = getClusteringColumns();
+    Preconditions.checkState(partitionColumns.size() == values.size());
+    for (int i=0; i<partitionColumns.size(); ++i) {
+      Pair<String, LiteralExpr> pair = getPartitionExprFromValue(values.get(i),
+          partitionColumns.get(i).getType());
+      if (pair == null) {
+        LOG.error("Could not get a type compatible value for key {} with value {}", i,
+            values.get(i));
+        return null;
+      }
+      result.add(pair.second);
+    }
+    return result;
+  }
+
+  /**
    * Checks that the last component of 'path' is of the form "<partitionkey>=<v>"
    * where 'v' is a type-compatible value from the domain of the 'partitionKey' column.
    * If not, returns null, otherwise returns a Pair instance, the first element is the
@@ -2398,9 +2444,23 @@ public class HdfsTable extends Table implements FeFsTable {
     Column column = getColumn(partName[0]);
     Preconditions.checkNotNull(column);
     Type type = column.getType();
-    LiteralExpr expr = null;
+    return getPartitionExprFromValue(partName[1], type);
+  }
+
+  /**
+   * Converts a given partition value to a {@link LiteralExpr} based on the type of the
+   * partition column.
+   * @param partValue Value of the partition column
+   * @param type Type of the partition column
+   * @return Pair which contains the partition value and its equivalent
+   * {@link LiteralExpr} according to the type provided.
+   * @throws UnsupportedEncodingException
+   */
+  private Pair<String, LiteralExpr> getPartitionExprFromValue(String partValue, Type type)
+      throws UnsupportedEncodingException {
+    LiteralExpr expr;
     // URL decode the partition value since it may contain encoded URL.
-    String value = URLDecoder.decode(partName[1], StandardCharsets.UTF_8.name());
+    String value = URLDecoder.decode(partValue, StandardCharsets.UTF_8.name());
     if (!value.equals(getNullPartitionKeyValue())) {
       try {
         expr = LiteralExpr.createFromUnescapedStr(value, type);
@@ -2422,7 +2482,7 @@ public class HdfsTable extends Table implements FeFsTable {
     } else {
       expr = new NullLiteral();
     }
-    return new Pair<String, LiteralExpr>(value, expr);
+    return new Pair<>(value, expr);
   }
 
   @Override // FeFsTable

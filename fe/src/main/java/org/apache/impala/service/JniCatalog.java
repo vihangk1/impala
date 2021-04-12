@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import org.apache.hadoop.hive.metastore.api.CurrentNotificationEventId;
 import org.apache.impala.authorization.AuthorizationConfig;
 import org.apache.impala.authorization.AuthorizationFactory;
 import org.apache.impala.authorization.AuthorizationManager;
@@ -33,6 +34,11 @@ import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.Db;
 import org.apache.impala.catalog.FeDb;
 import org.apache.impala.catalog.Function;
+import org.apache.impala.catalog.MetaStoreClientPool;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
+import org.apache.impala.catalog.events.ExternalEventsProcessor;
+import org.apache.impala.catalog.events.MetastoreEventsProcessor;
+import org.apache.impala.catalog.events.NoOpEventProcessor;
 import org.apache.impala.catalog.monitor.CatalogMonitor;
 import org.apache.impala.catalog.monitor.CatalogOperationMetrics;
 import org.apache.impala.compat.MetastoreShim;
@@ -128,17 +134,55 @@ public class JniCatalog {
       MetastoreShim.setHiveClientCapabilities();
     }
 
+    MetaStoreClientPool metaStoreClientPool = new MetaStoreClientPool(
+        CatalogServiceCatalog.INITIAL_META_STORE_CLIENT_POOL_SIZE,
+        cfg.initial_hms_cnxn_timeout_s);
     catalog_ = new CatalogServiceCatalog(cfg.load_catalog_in_background,
-        cfg.num_metadata_loading_threads, cfg.initial_hms_cnxn_timeout_s, getServiceId(),
-        cfg.local_library_path);
+        cfg.num_metadata_loading_threads, getServiceId(),
+        cfg.local_library_path, metaStoreClientPool);
     authzManager_ = authzFactory.newAuthorizationManager(catalog_);
     catalog_.setAuthzManager(authzManager_);
+    catalogOpExecutor_ = new CatalogOpExecutor(catalog_, authzConfig, authzManager_);
+    ExternalEventsProcessor eventsProcessor = getEventsProcessor(metaStoreClientPool,
+        catalogOpExecutor_);
+    catalog_.setMetastoreEventProcessor(eventsProcessor);
+    catalog_.startEventsProcessor();
     try {
       catalog_.reset();
     } catch (CatalogException e) {
       LOG.error("Error initializing Catalog. Please run 'invalidate metadata'", e);
     }
-    catalogOpExecutor_ = new CatalogOpExecutor(catalog_, authzConfig, authzManager_);
+  }
+
+
+  /**
+   * Returns a Metastore event processor object if
+   * <code>BackendConfig#getHMSPollingIntervalInSeconds</code> returns a non-zero
+   *.value of polling interval. Otherwise, returns a no-op events processor. It is
+   * important to fetch the current notification event id at the Catalog service
+   * initialization time so that event processor starts to sync at the event id
+   * corresponding to the catalog start time.
+   */
+  private ExternalEventsProcessor getEventsProcessor(
+      MetaStoreClientPool metaStoreClientPool, CatalogOpExecutor catalogOpExecutor)
+      throws ImpalaException {
+    long eventPollingInterval = BackendConfig.INSTANCE.getHMSPollingIntervalInSeconds();
+    if (eventPollingInterval <= 0) {
+      LOG.info(String
+          .format("Metastore event processing is disabled. Event polling interval is %d",
+              eventPollingInterval));
+      return NoOpEventProcessor.getInstance();
+    }
+    try (MetaStoreClient metaStoreClient = metaStoreClientPool.getClient()) {
+      CurrentNotificationEventId currentNotificationId =
+          metaStoreClient.getHiveClient().getCurrentNotificationEventId();
+      return MetastoreEventsProcessor.getInstance(
+          catalogOpExecutor, currentNotificationId.getEventId(), eventPollingInterval);
+    } catch (TException e) {
+      LOG.error("Unable to fetch the current notification event id from metastore.", e);
+      throw new CatalogException(
+          "Fatal error while initializing metastore event processor", e);
+    }
   }
 
   public static TUniqueId getServiceId() { return catalogServiceId_; }
