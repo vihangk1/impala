@@ -395,7 +395,7 @@ public class CatalogHmsAPIHelper {
       }
     }
     GetPartitionsByNamesResult result = new GetPartitionsByNamesResult(retPartitions);
-    if (request.isSetGetFileMetadata()) {
+    if (request.isGetFileMetadata()) {
       result.setDictionary(getSerializedNetworkAddress(
           response.table_info.network_addresses));
     }
