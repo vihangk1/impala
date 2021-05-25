@@ -1566,6 +1566,7 @@ public class MetastoreEvents {
     public void process() {
       debugLog(
           "Ignoring unknown event type " + metastoreNotificationEvent_.getEventType());
+      metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
     }
 
     @Override

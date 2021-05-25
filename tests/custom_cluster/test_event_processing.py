@@ -584,6 +584,12 @@ class TestEventProcessing(CustomClusterTestSuite):
           "alter view {0}.{1} set owner role `test-view-role`".format(db_name, view_name),
           # compute stats will generates ALTER_PARTITION
           "compute stats {0}.{1}".format(db_name, tbl_name),
+          # In case of insert overwrite, we always generate a insert event
+          # even if the no new files have been inserted.
+          "insert overwrite {0}.{1} select * from {0}.{1}".format(
+            db_name, empty_unpartitioned_tbl),
+          "insert overwrite {0}.{1} partition(part) select * from {0}.{1}".format(
+            db_name, empty_partitioned_tbl),
           # insert into a existing partition; generates INSERT self-event
           "insert into table {0}.{1} partition "
           "(year, month) select * from functional.alltypessmall where year=2009 "
@@ -621,11 +627,6 @@ class TestEventProcessing(CustomClusterTestSuite):
           # drop non-existing partition; essentially this is a no-op
           "alter table {0}.{1} drop if exists partition (year=2100, month=1)".format(
             db_name, tbl_name),
-          # empty table case where no insert events are generated
-          "insert overwrite {0}.{1} select * from {0}.{1}".format(
-            db_name, empty_unpartitioned_tbl),
-          "insert overwrite {0}.{1} partition(part) select * from {0}.{1}".format(
-            db_name, empty_partitioned_tbl),
           # in case of ACID tables no INSERT event is generated as the COMMIT event
           # contains the related data
           "create table {0}.{1} (c1 int) {2}".format(db_name,
