@@ -733,6 +733,8 @@ public class Frontend {
           BackendConfig.INSTANCE.getBackendCfg().use_local_catalog);
       // forward debug_actions to the catalogd
       if (result.getQuery_options().isSetDebug_action()) {
+        LOG.info("VIHANG-DEBUG: Setting debug action to " + result.getQuery_options()
+            .getDebug_action());
         ddl.getReset_metadata_params()
             .setDebug_action(result.getQuery_options().getDebug_action());
       }

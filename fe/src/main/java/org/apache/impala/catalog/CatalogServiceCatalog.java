@@ -3048,6 +3048,7 @@ public class CatalogServiceCatalog extends Catalog {
    */
   private boolean shouldTimeOut(long numAttempts, long maxNumAttempts, long startTime) {
     int timeoutSecs = BackendConfig.INSTANCE.getMaxWaitTimeForSyncDdlSecs();
+    LOG.info("timeoutSecs = {}", timeoutSecs);
     if (topicUpdateTblLockMaxWaitTimeMs_ > 0) {
       if (timeoutSecs <= 0) return false;
       return (System.currentTimeMillis() - startTime) > timeoutSecs * 1000L;
