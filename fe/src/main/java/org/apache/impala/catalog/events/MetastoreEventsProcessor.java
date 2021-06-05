@@ -208,10 +208,6 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
   public static final String STATUS_METRIC = "status";
   // last synced event id
   public static final String LAST_SYNCED_ID_METRIC = "last-synced-event-id";
-  // metric name which counts the number of self-events which are skipped
-  // currently this counter only applies to ALTER events (except for the rename case)
-  // TODO(Vihang) this metric is confusing; unify this with events-skipped metric
-  public static final String NUMBER_OF_SELF_EVENTS = "self-events-skipped";
   // metric name for number of tables which are refreshed by event processor so far
   public static final String NUMBER_OF_TABLE_REFRESHES = "tables-refreshed";
   // number of times events processor refreshed a partition
@@ -362,7 +358,6 @@ public class MetastoreEventsProcessor implements ExternalEventsProcessor {
         (Gauge<String>) () -> getStatus().toString());
     metrics_.addGauge(LAST_SYNCED_ID_METRIC,
         (Gauge<Long>) () -> lastSyncedEventId_.get());
-    metrics_.addCounter(NUMBER_OF_SELF_EVENTS);
     metrics_.addCounter(NUMBER_OF_TABLE_REFRESHES);
     metrics_.addCounter(NUMBER_OF_PARTITION_REFRESHES);
     metrics_.addCounter(NUMBER_OF_TABLES_ADDED);

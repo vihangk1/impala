@@ -493,7 +493,7 @@ public class MetastoreEventsProcessorTest {
         catalog_.getDb(TEST_DB_NAME));
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS)
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     String owner = catalog_.getDb(TEST_DB_NAME).getMetaStoreDb().getOwnerName();
     String newOwnerUser = "newUserFromImpala";
@@ -511,7 +511,7 @@ public class MetastoreEventsProcessorTest {
 
     long selfEventsCountAfter =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS)
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     // 2 alter commands above, so we expect the count to go up by 2
     assertEquals("Unexpected number of self-events generated",
@@ -529,7 +529,7 @@ public class MetastoreEventsProcessorTest {
         catalog_.getDb(TEST_DB_NAME));
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS).getCount();
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
 
     // Create a dummy scalar function.
     String fnName = "fn1";
@@ -546,7 +546,7 @@ public class MetastoreEventsProcessorTest {
     eventsProcessor_.processEvents();
     long numberOfSelfEventsAfter =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS).getCount();
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
     assertEquals("Unexpected number of self-events generated",
         numberOfSelfEventsBefore + 2, numberOfSelfEventsAfter);
 
@@ -713,7 +713,7 @@ public class MetastoreEventsProcessorTest {
     // events
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS)
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     runInsertTest(tableToInsertPart, tableToInsertMulPart, numberOfSelfEventsBefore,
         false);
@@ -732,7 +732,7 @@ public class MetastoreEventsProcessorTest {
     // events
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS)
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     runInsertTest(tableToInsertPart, tableToInsertMulPart, numberOfSelfEventsBefore,
         true);
@@ -854,7 +854,7 @@ public class MetastoreEventsProcessorTest {
 
     long selfEventsCountAfter =
         eventsProcessor_.getMetrics()
-            .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS)
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     // 2 single insert partition events, 1 multi insert partitions which includes 2 single
     // insert events 1 single insert table event
@@ -2120,7 +2120,7 @@ public class MetastoreEventsProcessorTest {
     final String testTblName = "testSelfEventsForTable";
     createTableFromImpala(TEST_DB_NAME, testTblName, true);
     long numberOfSelfEventsBefore = eventsProcessor_.getMetrics()
-        .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS).getCount();
+        .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
 
     alterTableSetTblPropertiesFromImpala(testTblName);
     eventsProcessor_.processEvents();
@@ -2187,7 +2187,7 @@ public class MetastoreEventsProcessorTest {
     //add test for alterCommentOnTableOrView
 
     long selfEventsCountAfter = eventsProcessor_.getMetrics()
-        .getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS).getCount();
+        .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
     // 9 alter commands above. Everyone except alterRename should generate
     // self-events so we expect the count to go up by 8
     assertEquals("Unexpected number of self-events generated",
@@ -2915,12 +2915,7 @@ public class MetastoreEventsProcessorTest {
   }
 
   /**
-   * Create DML request to Catalog
-   * @param dBName
-   * @param tableName
-   * @param redacted_sql_stmt
-   * @param created_partitions
-   * @return
+   * Create DML request to Catalog.
    */
   private TUpdateCatalogRequest createTestTUpdateCatalogRequest(String dBName,
       String tableName, String redacted_sql_stmt,

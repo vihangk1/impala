@@ -1129,7 +1129,7 @@ public class HdfsTable extends Table implements FeFsTable {
       throws TableLoadingException {
     load(reuseMetadata, client, msTbl, /* loadPartitionFileMetadata */
         true, /* loadTableSchema*/true, false,
-        /* partitionsToUpdate*/null, null, reason);
+        /* partitionsToUpdate*/null, null, null, reason);
   }
 
   public void load(boolean reuseMetadata, IMetaStoreClient client,
@@ -1137,7 +1137,7 @@ public class HdfsTable extends Table implements FeFsTable {
       String reason) throws TableLoadingException {
     load(reuseMetadata, client, msTbl, /* loadPartitionFileMetadata */
         true, /* loadTableSchema*/true, refreshUpdatedPartitions,
-        /* partitionsToUpdate*/null, null, reason);
+        /* partitionsToUpdate*/null, null, null, reason);
   }
 
   public void load(boolean reuseMetadata, IMetaStoreClient hiveClient,
@@ -1146,7 +1146,7 @@ public class HdfsTable extends Table implements FeFsTable {
       throws CatalogException {
     load(reuseMetadata, hiveClient, msTbl, /* loadPartitionFileMetadata */
         true, /* loadTableSchema*/true, refreshUpdatedPartitions,
-        /* partitionsToUpdate*/null, debugAction, reason);
+        /* partitionsToUpdate*/null, debugAction, null, reason);
   }
 
   /**
@@ -1177,7 +1177,8 @@ public class HdfsTable extends Table implements FeFsTable {
       org.apache.hadoop.hive.metastore.api.Table msTbl,
       boolean loadParitionFileMetadata, boolean loadTableSchema,
       boolean refreshUpdatedPartitions, Set<String> partitionsToUpdate,
-      @Nullable String debugAction, String reason) throws TableLoadingException {
+      @Nullable String debugAction, @Nullable Map<String, Long> partitionToEventId,
+      String reason) throws TableLoadingException {
     final Timer.Context context =
         getMetrics().getTimer(Table.LOAD_DURATION_METRIC).time();
     String annotation = String.format("%s metadata for %s%s partition(s) of %s.%s (%s)",
@@ -1220,7 +1221,7 @@ public class HdfsTable extends Table implements FeFsTable {
           } else {
             storageMetadataLoadTime_ += updatePartitionsFromHms(
                 client, partitionsToUpdate, loadParitionFileMetadata,
-                refreshUpdatedPartitions, debugAction);
+                refreshUpdatedPartitions, partitionToEventId, debugAction);
           }
           LOG.info("Incrementally loaded table metadata for: " + getFullName());
         } else {
@@ -1359,7 +1360,8 @@ public class HdfsTable extends Table implements FeFsTable {
    */
   private long updatePartitionsFromHms(IMetaStoreClient client,
       Set<String> partitionsToUpdate, boolean loadPartitionFileMetadata,
-      boolean refreshUpdatedPartitions, String debugAction) throws Exception {
+      boolean refreshUpdatedPartitions, Map<String, Long> partitionToEventId,
+      String debugAction) throws Exception {
     if (LOG.isTraceEnabled()) LOG.trace("Sync table partitions: " + getFullName());
     org.apache.hadoop.hive.metastore.api.Table msTbl = getMetaStoreTable();
     Preconditions.checkNotNull(msTbl);
@@ -1367,9 +1369,9 @@ public class HdfsTable extends Table implements FeFsTable {
     Preconditions.checkState(loadPartitionFileMetadata || partitionsToUpdate == null);
     PartitionDeltaUpdater deltaUpdater =
         refreshUpdatedPartitions ? new PartBasedDeltaUpdater(client,
-            loadPartitionFileMetadata, partitionsToUpdate, debugAction)
+            loadPartitionFileMetadata, partitionsToUpdate, partitionToEventId, debugAction)
             : new PartNameBasedDeltaUpdater(client, loadPartitionFileMetadata,
-                partitionsToUpdate, debugAction);
+                partitionsToUpdate, partitionToEventId, debugAction);
     deltaUpdater.apply();
     return deltaUpdater.loadTimeForFileMdNs_;
   }
@@ -1393,13 +1395,16 @@ public class HdfsTable extends Table implements FeFsTable {
     // reloaded.
     private final Set<String> partitionsToUpdate_;
     private final String debugAction_;
+    protected final Map<String, Long> partitionToEventId_;
 
     PartitionDeltaUpdater(IMetaStoreClient client, boolean loadPartitionFileMetadata,
-        Set<String> partitionsToUpdate, String debugAction) {
+        Set<String> partitionsToUpdate, @Nullable Map<String, Long> partitionToEventId,
+        String debugAction) {
       this.client_ = client;
       this.loadFileMd_ = loadPartitionFileMetadata;
       this.partitionsToUpdate_ = partitionsToUpdate;
       this.debugAction_ = debugAction;
+      partitionToEventId_ = partitionToEventId;
     }
 
     /**
@@ -1518,8 +1523,10 @@ public class HdfsTable extends Table implements FeFsTable {
 
     public PartBasedDeltaUpdater(
         IMetaStoreClient client, boolean loadPartitionFileMetadata,
-        Set<String> partitionsToUpdate, String debugAction) throws Exception {
-      super(client, loadPartitionFileMetadata, partitionsToUpdate, debugAction);
+        Set<String> partitionsToUpdate, Map<String, Long> partitionToEventId,
+        String debugAction) throws Exception {
+      super(client, loadPartitionFileMetadata, partitionsToUpdate, partitionToEventId,
+          debugAction);
       Stopwatch sw = Stopwatch.createStarted();
       List<Partition> partitionList;
       if (partitionsToUpdate != null) {
@@ -1590,7 +1597,7 @@ public class HdfsTable extends Table implements FeFsTable {
         }
       }
       return loadPartitionsFromMetastore(newMsPartitions,
-          /*inprogressPartBuilders=*/null, client_);
+          /*inprogressPartBuilders=*/null, partitionToEventId_, client_);
     }
 
     @Override
@@ -1601,7 +1608,10 @@ public class HdfsTable extends Table implements FeFsTable {
         updatedPartitions.add(Preconditions
             .checkNotNull(msPartitions_.get(partName)));
       }
-      return loadPartitionsFromMetastore(updatedPartitions, updatedPartBuilders, client_);
+      // we pass partitionToEventId argument as null below because updated partitions
+      // partitions were preexisting before load and just modified from outside.
+      return loadPartitionsFromMetastore(updatedPartitions, updatedPartBuilders,
+          null, client_);
     }
   }
 
@@ -1617,8 +1627,10 @@ public class HdfsTable extends Table implements FeFsTable {
 
     public PartNameBasedDeltaUpdater(
         IMetaStoreClient client, boolean loadPartitionFileMetadata,
-        Set<String> partitionsToUpdate, String debugAction) throws Exception {
-      super(client, loadPartitionFileMetadata, partitionsToUpdate, debugAction);
+        Set<String> partitionsToUpdate, Map<String, Long> partitionToEventId,
+        String debugAction) throws Exception {
+      super(client, loadPartitionFileMetadata, partitionsToUpdate, partitionToEventId,
+          debugAction);
       // Retrieve all the partition names from the Hive Metastore. We need this to
       // identify the delta between partitions of the local HdfsTable and the table entry
       // in the Hive Metastore. Note: This is a relatively "cheap" operation
@@ -1645,14 +1657,16 @@ public class HdfsTable extends Table implements FeFsTable {
       addedPartNames.addAll(Sets
           .difference(partitionNamesFromHms_, knownPartitionNames));
       return loadPartitionsFromMetastore(addedPartNames,
-          /*inprogressPartBuilders=*/null, client_);
+          /*inprogressPartBuilders=*/null, partitionToEventId_, client_);
     }
 
     @Override
     public long loadUpdatedPartitions(
         Map<String, HdfsPartition.Builder> updatedPartitionBuilders) throws Exception {
+      // we pass partitionToEventId argument as null below because updated partitions
+      // partitions were preexisting before load and just modified from outside.
       return loadPartitionsFromMetastore(updatedPartitionBuilders.keySet(),
-          updatedPartitionBuilders, client_);
+          updatedPartitionBuilders, null, client_);
     }
   }
 
@@ -1783,19 +1797,21 @@ public class HdfsTable extends Table implements FeFsTable {
    * @return time in nanoseconds spent in loading file metadata.
    */
   private long loadPartitionsFromMetastore(Set<String> partitionNames,
-      Map<String, HdfsPartition.Builder> inprogressPartBuilders, IMetaStoreClient client)
-      throws Exception {
+      Map<String, HdfsPartition.Builder> inprogressPartBuilders,
+      @Nullable Map<String, Long> partitionToEventId, IMetaStoreClient client) throws Exception {
     Preconditions.checkNotNull(partitionNames);
     if (partitionNames.isEmpty()) return 0;
     // Load partition metadata from Hive Metastore.
     List<Partition> msPartitions = new ArrayList<>(
         MetaStoreUtil.fetchPartitionsByName(
             client, Lists.newArrayList(partitionNames), db_.getName(), name_));
-    return loadPartitionsFromMetastore(msPartitions, inprogressPartBuilders, client);
+    return loadPartitionsFromMetastore(msPartitions, inprogressPartBuilders,
+        partitionToEventId, client);
   }
 
   private long loadPartitionsFromMetastore(List<Partition> msPartitions,
-      Map<String, HdfsPartition.Builder> inprogressPartBuilders, IMetaStoreClient client)
+      Map<String, HdfsPartition.Builder> inprogressPartBuilders,
+      @Nullable Map<String, Long> partitionToEventId, IMetaStoreClient client)
       throws Exception {
     FsPermissionCache permCache = preloadPermissionsCache(msPartitions);
     List<HdfsPartition.Builder> partBuilders = new ArrayList<>(msPartitions.size());
@@ -1809,6 +1825,9 @@ public class HdfsTable extends Table implements FeFsTable {
       }
       partBuilder = createOrUpdatePartitionBuilder(
           msPartition.getSd(), msPartition, permCache, partBuilder);
+      if (partitionToEventId != null) {
+        partBuilder.setCreateEventId(partitionToEventId.getOrDefault(partName, -1L));
+      }
       partBuilders.add(partBuilder);
     }
     long fileMdLoadTime = loadFileMetadataForPartitions(client, partBuilders,

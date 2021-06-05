@@ -1256,6 +1256,20 @@ public class CatalogOpExecutor {
   private void loadTableMetadata(Table tbl, long newCatalogVersion,
       boolean reloadFileMetadata, boolean reloadTableSchema,
       Set<String> partitionsToUpdate, String reason) throws CatalogException {
+    loadTableMetadata(tbl, newCatalogVersion, reloadFileMetadata, reloadTableSchema,
+        partitionsToUpdate, null, reason);
+  }
+
+  /**
+   * Same as {@link #loadTableMetadata(Table, long, boolean, boolean, Set, String)} but
+   * takes in a Map of partition name to event id which is passed down to the table load
+   * method.
+   */
+  private void loadTableMetadata(Table tbl, long newCatalogVersion,
+      boolean reloadFileMetadata, boolean reloadTableSchema,
+      Set<String> partitionsToUpdate, @Nullable Map<String, Long> partitionToEventId,
+      String reason)
+      throws CatalogException {
     Preconditions.checkState(tbl.isWriteLockedByCurrentThread());
     try (MetaStoreClient msClient = catalog_.getMetaStoreClient()) {
       org.apache.hadoop.hive.metastore.api.Table msTbl =
@@ -1263,7 +1277,7 @@ public class CatalogOpExecutor {
       if (tbl instanceof HdfsTable) {
         ((HdfsTable) tbl).load(true, msClient.getHiveClient(), msTbl,
             reloadFileMetadata, reloadTableSchema, false, partitionsToUpdate, null,
-            reason);
+            partitionToEventId, reason);
       } else {
         tbl.load(true, msClient.getHiveClient(), msTbl, reason);
       }
@@ -3833,27 +3847,14 @@ public class CatalogOpExecutor {
           eventId, hdfsTable.getFullName());
       return partsToBeAdded;
     }
-    // Add partition events are transactional. we should either not find any of the
-    // partitions in the partitions or all the partitions in the event
-    Boolean allPartsFound = null;
     Preconditions.checkState(!partitions.isEmpty());
     for (Partition part : partitions) {
       List<LiteralExpr> partExprs = FeCatalogUtils
           .parsePartitionKeyValues(hdfsTable, part.getValues());
       HdfsPartition hdfsPartition = hdfsTable.getPartition(partExprs);
-      boolean thisPartFound = hdfsPartition != null;
-      if (allPartsFound == null) {
-        allPartsFound = thisPartFound;
-      }
-      if (!allPartsFound.equals(thisPartFound)) {
-        LOG.error("Expected partition {} to be {} but the partition {} for table {}",
-            FileUtils.makePartName(hdfsTable.getClusteringColNames(), part.getValues()),
-            (allPartsFound ? "found" : "not found"),
-            (thisPartFound ? "exists" : "does not exist"), hdfsTable.getFullName());
-        throw new CatalogException(
-            "One or more partitions from the event missing from catalogd");
-      }
-      if (!thisPartFound) {
+      // if partition is not present and if it was not removed later
+      // it can be added.
+      if (hdfsPartition == null) {
         boolean removed = deleteEventLog_.wasRemovedAfter(eventId,
             DeleteEventLog.getPartitionKey(hdfsTable, part.getValues()));
         // it is possible that the partition doesn't exist anymore because it was removed
@@ -5649,6 +5650,10 @@ public class CatalogOpExecutor {
       // fire an insert event. Collect the partition name both as a single string and
       // as a list of values for convenience.
       Map<String, List<String>> addedPartitionNames = new HashMap<>();
+      // if event processing is enabled we collect the events ids generated for the added
+      // partitions in this map. This is used later on when table is reloaded to set
+      // the createEventId for the partitions.
+      Map<String, Long> partitionToEventId = new HashMap<>();
       addCatalogServiceIdentifiers(table, catalog_.getCatalogServiceId(),
           newCatalogVersion);
       if (table.getNumClusteringCols() > 0) {
@@ -5715,9 +5720,9 @@ public class CatalogOpExecutor {
             // caching directives. The reason is that some partitions could have been
             // added concurrently, and we want to avoid caching a partition twice and
             // leaking a caching directive.
-            List<org.apache.hadoop.hive.metastore.api.Partition> addedHmsParts =
-                msClient.getHiveClient().add_partitions(hmsParts, true, true);
-            for (org.apache.hadoop.hive.metastore.api.Partition part: addedHmsParts) {
+            List<Partition> addedHmsParts = addHmsPartitions(
+                msClient, table, hmsParts, partitionToEventId, true);
+            for (Partition part: addedHmsParts) {
               String part_name =
                   FeCatalogUtils.getPartitionName((FeFsTable)table, part.getValues());
               addedPartitionNames.put(part_name, part.getValues());
@@ -5766,9 +5771,6 @@ public class CatalogOpExecutor {
                 }
               }
             }
-          } catch (AlreadyExistsException e) {
-            throw new InternalException(
-                "AlreadyExistsException thrown although ifNotExists given", e);
           } catch (Exception e) {
             throw new InternalException("Error adding partitions", e);
           }

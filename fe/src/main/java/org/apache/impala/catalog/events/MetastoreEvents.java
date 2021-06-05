@@ -26,6 +26,7 @@ import com.google.common.collect.Lists;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Map;
@@ -240,6 +241,8 @@ public class MetastoreEvents {
           + "filtered out: %d", sizeBefore, numFilteredEvents));
       metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
               .inc(numFilteredEvents);
+      LOG.info("Incremented skipped metric to " + metrics_
+          .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
       return metastoreEvents;
     }
   }
@@ -319,6 +322,8 @@ public class MetastoreEvents {
       if (isEventProcessingDisabled()) {
         LOG.info(debugString("Skipping this event because of flag evaluation"));
         metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+        infoLog("Incremented skipped metric to " + metrics_
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
         return;
       }
       process();
@@ -438,11 +443,15 @@ public class MetastoreEvents {
     protected boolean isSelfEvent(boolean isInsertEvent) {
       try {
         if (catalog_.evaluateSelfEvent(isInsertEvent, getSelfEventContext())) {
-          metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_SELF_EVENTS).inc();
+          metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+          infoLog("Incremented events skipped counter to {}",
+              metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
+                  .getCount());
           return true;
         }
       } catch (CatalogException e) {
-        debugLog("Received exception {}. Ignoring self-event evaluation", e.getMessage());
+        debugLog("Received exception {}. Ignoring self-event evaluation",
+            e.getMessage());
       }
       return false;
     }
@@ -704,6 +713,8 @@ public class MetastoreEvents {
           metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_TABLES_ADDED).inc();
         } else {
           metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+          infoLog("Incremented skipped metric to " + metrics_
+              .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
         }
       } catch (CatalogException e) {
         // if a DatabaseNotFoundException is caught here it means either we incorrectly
@@ -926,6 +937,8 @@ public class MetastoreEvents {
       }
       if (!oldTblRemoved.getRef() || !newTblAdded.getRef()) {
         metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+        infoLog("Incremented skipped metric to " + metrics_
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
       }
     }
     /**
@@ -1092,6 +1105,8 @@ public class MetastoreEvents {
           metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_TABLES_REMOVED).inc();
         } else {
           metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+          infoLog("Incremented skipped metric to " + metrics_
+              .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
         }
       } catch (CatalogException e) {
         throw new MetastoreNotificationException(
@@ -1152,6 +1167,8 @@ public class MetastoreEvents {
             "Database {} was not added since it either exists or was "
                 + "removed since the event was generated", dbName_);
         metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+        infoLog("Incremented skipped metric to " + metrics_
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
       } else {
         debugLog("Successfully added database {}", dbName_);
         metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_DATABASES_ADDED).inc();
@@ -1276,6 +1293,8 @@ public class MetastoreEvents {
         metrics_.getCounter(MetastoreEventsProcessor.NUMBER_OF_DATABASES_REMOVED).inc();
       } else {
         metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+        infoLog("Incremented skipped metric to " + metrics_
+            .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
       }
     }
   }
@@ -1344,6 +1363,19 @@ public class MetastoreEvents {
 
     @Override
     public SelfEventContext getSelfEventContext() {
+      // self event evaluation is only done for transactional tables currently.
+      // for non-transactional tables we use the partition level createEventId
+      if (AcidUtils.isTransactionalTable(msTbl_.getParameters())) {
+        Map<String, String> params = new HashMap<>();
+        // all the partitions are added as one transaction and hence we expect all the
+        // added partitions to have the same catalog service identifiers. Using the first
+        // one for the params is enough for the purpose of self-event evaluation
+        if (!addedPartitions_.isEmpty()) {
+          params.putAll(addedPartitions_.get(0).getParameters());
+        }
+        return new SelfEventContext(dbName_, tblName_, partitionKeyVals_,
+            params);
+      }
       throw new UnsupportedOperationException("Self-event evaluation is unnecessary for"
           + " this event type");
     }
@@ -1357,7 +1389,7 @@ public class MetastoreEvents {
       }
       try {
         // Reload the whole table if it's a transactional table.
-        if (AcidUtils.isTransactionalTable(msTbl_.getParameters())) {
+        if (AcidUtils.isTransactionalTable(msTbl_.getParameters()) && !isSelfEvent()) {
           reloadTableFromCatalog("ADD_PARTITION", true);
         } else {
           // HMS adds partitions in a transactional way. This means there may be multiple
@@ -1375,6 +1407,8 @@ public class MetastoreEvents {
                 .inc(numPartsAdded);
           } else {
             metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+            infoLog("Incremented skipped metric to " + metrics_
+                .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
           }
         }
       } catch (CatalogException e) {
@@ -1518,7 +1552,9 @@ public class MetastoreEvents {
         infoLog("Partition list is empty. Ignoring this event.");
       }
       try {
-        // Reload the whole table if it's a transactional table.
+        // Reload the whole table if it's a transactional table. In case of transactional
+        // tables we rely on the self-event evaluation since there is no fine-grained
+        // partition level refresh.
         if (AcidUtils.isTransactionalTable(msTbl_.getParameters())) {
           reloadTableFromCatalog("DROP_PARTITION", true);
         } else {
@@ -1532,6 +1568,8 @@ public class MetastoreEvents {
                 .inc(numPartsRemoved);
           } else {
             metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
+            infoLog("Incremented skipped metric to " + metrics_
+                .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount());
           }
         }
       } catch (CatalogException e) {
@@ -1566,7 +1604,6 @@ public class MetastoreEvents {
     public void process() {
       debugLog(
           "Ignoring unknown event type " + metastoreNotificationEvent_.getEventType());
-      metrics_.getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).inc();
     }
 
     @Override
