@@ -491,6 +491,7 @@ public class MetastoreEventsProcessorTest {
     createDatabaseFromImpala(TEST_DB_NAME, null);
     assertNotNull("Db should have been found after create database statement",
         catalog_.getDb(TEST_DB_NAME));
+    eventsProcessor_.processEvents();
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
             .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
@@ -527,6 +528,7 @@ public class MetastoreEventsProcessorTest {
     createDatabaseFromImpala(TEST_DB_NAME, null);
     assertNotNull("Db should have been found after create database statement",
         catalog_.getDb(TEST_DB_NAME));
+    eventsProcessor_.processEvents();
     long numberOfSelfEventsBefore =
         eventsProcessor_.getMetrics()
             .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
@@ -709,6 +711,7 @@ public class MetastoreEventsProcessorTest {
     String tableToInsertPart = "tbl_with_mul_part";
     String tableToInsertMulPart = "tbl_to_insert_mul_part";
     createInsertTestTbls(tableToInsertPart, tableToInsertMulPart);
+    eventsProcessor_.processEvents();
     // count self event from here, numberOfSelfEventsBefore=4 as we have 4 ADD PARTITION
     // events
     long numberOfSelfEventsBefore =
@@ -728,6 +731,7 @@ public class MetastoreEventsProcessorTest {
     String tableToInsertPart = "tbl_with_mul_part";
     String tableToInsertMulPart = "tbl_to_insert_mul_part";
     createInsertTestTbls(tableToInsertPart, tableToInsertMulPart);
+    eventsProcessor_.processEvents();
     // count self event from here, numberOfSelfEventsBefore=4 as we have 4 ADD PARTITION
     // events
     long numberOfSelfEventsBefore =
@@ -829,7 +833,7 @@ public class MetastoreEventsProcessorTest {
     updated_partitions.put(partition2, updatedPartition2);
     insertMulPartFromImpala(tableToInsertMulPart, tableToInsertPart, updated_partitions,
         overwrite);
-    // we expect 3 INSERT events (2 for the insertTbl and 1 for multiInsertTbl)
+    // we expect 4 INSERT events (2 for the insertTbl and 2 for multiInsertTbl)
     List<NotificationEvent> events = eventsProcessor_.getNextMetastoreEvents();
     assertEquals(4, events.size());
     assertEquals(tbl1Part1Files, getFilesFromEvent(events.get(0)));
@@ -840,6 +844,7 @@ public class MetastoreEventsProcessorTest {
 
     // Test insert into table
     String unpartitionedTbl = "tbl_to_insert";
+    // create table self-event 5
     createTableLike("functional", "tinytable", TEST_DB_NAME, unpartitionedTbl);
     HdfsTable tinyTable = (HdfsTable) catalog_
         .getOrLoadTable("functional", "tinytable", "test", null);
@@ -849,6 +854,7 @@ public class MetastoreEventsProcessorTest {
         copyFiles(tinyTable.getFileSystem(), new Path(tinyTable.getHdfsBaseDir()),
             unpartTable.getFileSystem(), new Path(unpartTable.getHdfsBaseDir()),
             overwrite, "copy_");
+    // insert self-event 6
     insertFromImpala(unpartitionedTbl, false, "", "", overwrite, copied_files);
     eventsProcessor_.processEvents();
 
@@ -857,9 +863,9 @@ public class MetastoreEventsProcessorTest {
             .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC)
             .getCount();
     // 2 single insert partition events, 1 multi insert partitions which includes 2 single
-    // insert events 1 single insert table event
+    // insert events 1 single insert table event, 1 create table event
     assertEquals("Unexpected number of self-events generated",
-        numberOfSelfEventsBefore + 5, selfEventsCountAfter);
+        numberOfSelfEventsBefore + 6, selfEventsCountAfter);
   }
 
   private List<String> getFilesFromEvent(NotificationEvent event) {
@@ -2119,6 +2125,7 @@ public class MetastoreEventsProcessorTest {
     eventsProcessor_.processEvents();
     final String testTblName = "testSelfEventsForTable";
     createTableFromImpala(TEST_DB_NAME, testTblName, true);
+    eventsProcessor_.processEvents();
     long numberOfSelfEventsBefore = eventsProcessor_.getMetrics()
         .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
 
@@ -2188,10 +2195,9 @@ public class MetastoreEventsProcessorTest {
 
     long selfEventsCountAfter = eventsProcessor_.getMetrics()
         .getCounter(MetastoreEventsProcessor.EVENTS_SKIPPED_METRIC).getCount();
-    // 9 alter commands above. Everyone except alterRename should generate
-    // self-events so we expect the count to go up by 8
+    // 9 alter commands above.
     assertEquals("Unexpected number of self-events generated",
-        numberOfSelfEventsBefore + 8, selfEventsCountAfter);
+        numberOfSelfEventsBefore + 9, selfEventsCountAfter);
   }
 
   private abstract class AlterTableExecutor {
