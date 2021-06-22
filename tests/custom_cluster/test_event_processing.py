@@ -209,7 +209,113 @@ class TestEventProcessing(CustomClusterTestSuite):
     self.__run_self_events_test(unique_database, True)
     self.__run_self_events_test(unique_database, False)
 
-  @pytest.mark.xfail(run=False, reason="This is failing due to HIVE-23995")
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    catalogd_args="--hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
+
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    impalad_args="--use_local_catalog=true",
+    catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_local_catalog_create_drop_events(self, unique_database):
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
+
+  def __run_create_drop_test(self, db, type, rename=False, renameDb=False):
+    NUM_ITERS = 200
+    if type == "table":
+      if not rename:
+        queries = [
+          "create table {0}.test_{1} (i int)".format(db, 1),
+          "drop table {0}.test_{1}".format(db, 1)
+        ]
+      else:
+        db_1 = "{}_1".format(db)
+        if renameDb:
+          self.execute_query_expect_success(self.create_impala_client(),
+            "drop database if exists {0} cascade".format(db_1))
+          self.execute_query_expect_success(self.create_impala_client(),
+            "create database {0}".format(db_1))
+        self.execute_query_expect_success(self.create_impala_client(),
+          "create table if not exists {0}.rename_test_1 (i int)".format(db))
+        if renameDb:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db, db_1),
+            "alter table {0}.rename_test_1 rename to {1}.rename_test_1".format(db_1, db)
+          ]
+        else:
+          queries = [
+            "alter table {0}.rename_test_1 rename to {0}.rename_test_2".format(db),
+            "alter table {0}.rename_test_2 rename to {0}.rename_test_1".format(db)
+          ]
+      create_metric_name = "tables-added"
+      removed_metric_name = "tables-removed"
+    elif type == "database":
+      self.execute_query_expect_success(self.create_impala_client(),
+        "drop database if exists {0}".format("test_create_drop_db"))
+      queries = [
+        "create database {db}".format(db="test_create_drop_db"),
+        "drop database {db}".format(db="test_create_drop_db")
+      ]
+      create_metric_name = "databases-added"
+      removed_metric_name = "databases-removed"
+    else:
+      tbl_name = "test_create_drop_partition"
+      self.execute_query_expect_success(self.create_impala_client(),
+        "create table {db}.{tbl} (c int) partitioned by (p int)".format(
+          db=db, tbl=tbl_name))
+      queries = [
+        "alter table {db}.{tbl} add partition (p=1)".format(db=db, tbl=tbl_name),
+        "alter table {db}.{tbl} drop partition (p=1)".format(db=db, tbl=tbl_name)
+      ]
+      create_metric_name = "partitions-added"
+      removed_metric_name = "partitions-removed"
+
+    # get the metric before values
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_before = EventProcessorUtils.\
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_before = EventProcessorUtils.\
+      get_event_processor_metric('events-skipped', 0)
+    for iter in xrange(NUM_ITERS):
+      for q in queries:
+        try:
+          self.execute_query_expect_success(self.create_impala_client(), q)
+        except Exception, e:
+          print("Failed in {} iterations. Error {}".format(iter, str(e)))
+          raise
+    EventProcessorUtils.wait_for_event_processing(self)
+    create_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(create_metric_name, 0)
+    removed_metric_val_after = EventProcessorUtils. \
+      get_event_processor_metric(removed_metric_name, 0)
+    events_skipped_after = EventProcessorUtils. \
+      get_event_processor_metric('events-skipped', 0)
+    num_delete_event_entries = EventProcessorUtils. \
+      get_event_processor_metric('delete-event-log-size', 0)
+    assert EventProcessorUtils.get_event_processor_status() == "ACTIVE"
+    # None of the queries above should actually trigger a add/remove object from events
+    assert int(create_metric_val_after) == int(create_metric_val_before)
+    assert int(removed_metric_val_after) == int(removed_metric_val_before)
+    # each query set generates 2 events and both of them should be skipped
+    assert int(events_skipped_after) == NUM_ITERS * 2 + int(events_skipped_before)
+    # make sure that there are no more entries in the delete event log
+    assert int(num_delete_event_entries) == 0
+ 
+
   @CustomClusterTestSuite.with_args(catalogd_args="--hms_event_polling_interval_s=1")
   def test_event_based_replication(self):
     self.__run_event_based_replication_tests()
