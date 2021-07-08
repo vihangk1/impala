@@ -17,6 +17,7 @@
 
 package org.apache.impala.catalog.metastore;
 
+import java.lang.annotation.Annotation;
 import java.util.ArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -37,11 +38,13 @@ import java.net.InetSocketAddress;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.TServerSocketKeepAlive;
 import org.apache.hadoop.hive.metastore.api.ThriftHiveMetastore;
 import org.apache.impala.catalog.CatalogException;
 import org.apache.impala.catalog.CatalogServiceCatalog;
 import org.apache.impala.catalog.HdfsTable;
+import org.apache.impala.catalog.MetaStoreClientPool.MetaStoreClient;
 import org.apache.impala.catalog.metastore.HmsApiNameEnum;
 import org.apache.impala.catalog.monitor.CatalogMonitor;
 import org.apache.impala.common.Metrics;
@@ -221,7 +224,11 @@ public class CatalogMetastoreServer extends ThriftHiveMetastore implements
 
       try {
         LOG.debug("Invoking HMS API: {}", method.getName());
-        return method.invoke(handler_, args);
+        if (method.isAnnotationPresent(ServedFromCatalogd.class)) {
+          return method.invoke(handler_, args);
+        } else {
+          return forwardToHms(method, args);
+        }
       } catch (Exception ex) {
         Throwable unwrapped = unwrap(ex);
         LOG.error("Received exception while executing "
@@ -235,6 +242,30 @@ public class CatalogMetastoreServer extends ThriftHiveMetastore implements
                 method.getName()))
             .update(elapsedTime, TimeUnit.MILLISECONDS);
       }
+    }
+
+    /**
+     * This method uses reflection to map the given method to the metastore's thrift
+     * client method and invoke the same method on the client with the given arguments.
+     * @param method
+     * @param args
+     * @return
+     * @throws Exception
+     */
+    private Object forwardToHms(Method method, Object[] args) throws Exception {
+      try (MetaStoreClient metaStoreClient = catalog_.getMetaStoreClient()) {
+        return method.invoke(metaStoreClient.getHiveClient().getThriftClient(), args);
+      }
+    }
+
+    /**
+     * Returns true if a method is annotated with {@code ServedFromCatalogd} annotation.
+     */
+    private boolean isServedFromCatalogd(Method method) {
+      for (Annotation annotation : method.getDeclaredAnnotations()) {
+        if (annotation.getClass().equals(ServedFromCatalogd.class)) return true;
+      }
+      return false;
     }
 
     /**
@@ -359,12 +390,9 @@ public class CatalogMetastoreServer extends ThriftHiveMetastore implements
   }
 
   /**
-<<<<<<< HEAD
    * Returns the RPC and connection metrics for this metastore server. //TODO hook this
    * method to the Catalog's debug UI
-=======
    * Returns the RPC and connection metrics for this metastore server.
->>>>>>> c4a8633759... IMPALA-10645: Log catalogd HMS API metrics
    */
   @Override
   public TCatalogdHmsCacheMetrics getCatalogdHmsCacheMetrics() {

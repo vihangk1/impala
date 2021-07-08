@@ -71,6 +71,7 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
   }
 
   @Override
+  @ServedFromCatalogd
   public GetTableResult get_table_req(GetTableRequest getTableRequest)
       throws MetaException, NoSuchObjectException, TException {
 
@@ -99,6 +100,7 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
    * since Catalog has no way to deserialize the expression sent over by the client.
    */
   @Override
+  @ServedFromCatalogd
   public PartitionsByExprResult get_partitions_by_expr(
       PartitionsByExprRequest partitionsByExprRequest) throws TException {
 
@@ -136,6 +138,7 @@ public class CatalogMetastoreServiceHandler extends MetastoreServiceHandler {
    * {@code fallBackToHMSOnErrors_} is set.
    */
   @Override
+  @ServedFromCatalogd
   public GetPartitionsByNamesResult get_partitions_by_names_req(
       GetPartitionsByNamesRequest getPartitionsByNamesRequest) throws TException {
 
