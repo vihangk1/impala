@@ -444,7 +444,20 @@ class TestLocalCatalogRetries(CustomClusterTestSuite):
     for i in t.imap_unordered(do_table, xrange(NUM_ITERS)):
       pass
 
-
+  @pytest.mark.execute_serially
+  @CustomClusterTestSuite.with_args(
+    impalad_args="--use_local_catalog=true",
+    catalogd_args="--catalog_topic_mode=minimal --hms_event_polling_interval_s=1",
+    cluster_size=1)
+  def test_local_catalog_create_drop_events(self, unique_database):
+    """
+    Test is similar to the test_create_drop_events except this runs on local
+    """
+    self.__run_create_drop_test(unique_database, "database")
+    self.__run_create_drop_test(unique_database, "table")
+    self.__run_create_drop_test(unique_database, "table", True)
+    self.__run_create_drop_test(unique_database, "table", True, True)
+    self.__run_create_drop_test(unique_database, "partition")
 class TestObservability(CustomClusterTestSuite):
   def get_catalog_cache_metrics(self, impalad):
     """ Returns catalog cache metrics as a dict by scraping the json metrics page on the
